@@ -10,6 +10,7 @@ COPY requirements.txt ./
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
 COPY app.py fix_songs.sh ./
+COPY webapp ./webapp
 COPY templates ./templates
 COPY static ./static
 
