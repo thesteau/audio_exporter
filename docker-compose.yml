@@ -5,3 +5,5 @@ services:
       - 7160:8000
     volumes:
       - ./songs:/songs
+    restart: 
+      unless-stopped
