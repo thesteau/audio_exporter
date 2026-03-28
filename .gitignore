@@ -31,5 +31,5 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Flask uploads
-service/songs/
+# App data
+songs/

@@ -4,4 +4,4 @@ services:
     ports:
       - 7160:8000
     volumes:
-      - ./service/songs:/service/songs
+      - ./songs:/songs

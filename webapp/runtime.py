@@ -2,7 +2,7 @@ import threading
 import time
 
 from .config import CLEANUP_INTERVAL_SECONDS
-from .services.files import cleanup_old_music_files, ensure_directories
+from .services.files import cleanup_media_files, ensure_directories
 
 _cleanup_thread_started = False
 _startup_complete = False
@@ -12,7 +12,7 @@ _startup_lock = threading.Lock()
 def cleanup_worker():
     while True:
         time.sleep(CLEANUP_INTERVAL_SECONDS)
-        cleanup_old_music_files()
+        cleanup_media_files()
 
 
 def ensure_cleanup_thread():
@@ -31,6 +31,6 @@ def ensure_runtime_ready():
         if _startup_complete:
             return
         ensure_directories()
-        cleanup_old_music_files()
+        cleanup_media_files()
         ensure_cleanup_thread()
         _startup_complete = True

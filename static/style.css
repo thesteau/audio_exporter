@@ -43,22 +43,34 @@ body {
 
 .field-label {
   display: block;
-  margin-bottom: 12px;
+  margin: 12px 0 12px;
   font-weight: 600;
 }
 
-input[type="file"] {
+.field-label:first-of-type {
+  margin-top: 0;
+}
+
+input[type="file"],
+select {
   width: 100%;
   padding: 12px;
   border: 1px solid #d1d5db;
   border-radius: 10px;
   background: #f9fafb;
+  color: #111827;
+  box-sizing: border-box;
 }
 
 .button-row,
-.panel-actions,
-.process-form {
+.panel-actions {
   margin-top: 16px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .btn {
@@ -170,7 +182,7 @@ input[type="file"] {
 }
 
 @media (min-width: 880px) {
-  .file-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .file-grid-two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

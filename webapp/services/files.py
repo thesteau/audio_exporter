@@ -2,31 +2,20 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from ..config import (
-    ALLOWED_CATEGORIES,
-    BASE_DIR,
-    CLEANUP_THRESHOLD_SECONDS,
-    CONVERTED_DIR,
-    OLD_DIR,
-    UPLOAD_DIR,
-)
+from ..config import ALLOWED_CATEGORIES, BASE_DIR, CLEANUP_THRESHOLD_SECONDS, CONVERTED_DIR, UPLOAD_DIR
 
 
 def ensure_directories():
-    for directory in (UPLOAD_DIR, OLD_DIR, CONVERTED_DIR):
+    for directory in (UPLOAD_DIR, CONVERTED_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
 
 def sanitize_filename(filename: str) -> str:
     name = Path(filename).name
     safe = "".join(ch for ch in name if ch.isalnum() or ch in (" ", ".", "-", "_"))
-    safe = safe.strip()
+    safe = safe.strip().lstrip(".")
     if not safe:
-        return "file.mp3"
-    if safe.startswith("."):
-        safe = safe.lstrip(".")
-    if not safe.lower().endswith(".mp3"):
-        safe += ".mp3"
+        return "file"
     return safe
 
 
@@ -59,14 +48,14 @@ def list_directory(category: str):
     return files
 
 
-def cleanup_old_music_files():
+def cleanup_media_files():
     now = time.time()
     removed = []
-    for directory in (UPLOAD_DIR, OLD_DIR, CONVERTED_DIR):
+    for directory in (UPLOAD_DIR, CONVERTED_DIR):
         if not directory.exists():
             continue
         for path in directory.iterdir():
-            if not path.is_file() or path.suffix.lower() != ".mp3":
+            if not path.is_file():
                 continue
             try:
                 file_age = now - path.stat().st_mtime
@@ -74,10 +63,10 @@ def cleanup_old_music_files():
                     path.unlink()
                     removed.append(path)
             except OSError as exc:
-                print(f"Failed to remove old file {path}: {exc}")
+                print(f"Failed to remove file {path}: {exc}")
     if removed:
         removed_names = ", ".join(str(path.name) for path in removed)
-        print(f"Cleaned up old MP3 files: {removed_names}")
+        print(f"Cleaned up media files: {removed_names}")
     return removed
 
 
