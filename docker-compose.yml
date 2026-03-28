@@ -1,0 +1,8 @@
+version: '3.9'
+services:
+  mp3-fixer:
+    build: .
+    ports:
+      - 8000:8000
+    volumes:
+      - ${SERVICE_SONGS:-./service/songs}:/service/songs

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MP3 Fixer</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="site-shell">
+      <header class="top-bar">
+        <div>
+          <h1>MP3 Fixer</h1>
+          <p class="subtitle">Upload MP3 files, rebuild them with FFmpeg, and download originals or fixed files.</p>
+        </div>
+      </header>
+
+      <main>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <section class="flash-list">
+              {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+              {% endfor %}
+            </section>
+          {% endif %}
+        {% endwith %}
+
+        <section class="card upload-card">
+          <h2>Upload MP3 files</h2>
+          <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
+            <label class="field-label" for="files">Select one or more MP3 files</label>
+            <input type="file" id="files" name="files" accept="audio/mpeg" multiple />
+            <div class="button-row">
+              <button type="submit" class="btn btn-primary">Upload and Process</button>
+            </div>
+          </form>
+          <form action="{{ url_for('process_files') }}" method="post" class="process-form">
+            <button type="submit" class="btn btn-secondary">Process existing uploaded MP3s</button>
+          </form>
+        </section>
+
+        <section class="file-grid">
+          <div class="file-panel">
+            <div class="panel-header">
+              <h3>Uploaded</h3>
+              <span class="count">{{ uploaded_files | length }} files</span>
+            </div>
+            {% if uploaded_files %}
+              <table class="file-table">
+                <thead>
+                  <tr><th>Name</th><th>Size</th><th>Modified</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {% for file in uploaded_files %}
+                    <tr>
+                      <td>{{ file.name }}</td>
+                      <td>{{ (file.size / 1024) | round(1) }} KB</td>
+                      <td>{{ file.modified.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                      <td><a class="link-button" href="{{ url_for('download_file', category='uploaded', filename=file.name) }}">Download</a></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <div class="empty-state">No uploaded files yet.</div>
+            {% endif %}
+          </div>
+
+          <div class="file-panel">
+            <div class="panel-header">
+              <h3>Old</h3>
+              <span class="count">{{ old_files | length }} files</span>
+            </div>
+            <div class="panel-actions">
+              <a class="btn btn-secondary" href="{{ url_for('download_zip', category='old') }}">Download ZIP</a>
+            </div>
+            {% if old_files %}
+              <table class="file-table">
+                <thead>
+                  <tr><th>Name</th><th>Size</th><th>Modified</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {% for file in old_files %}
+                    <tr>
+                      <td>{{ file.name }}</td>
+                      <td>{{ (file.size / 1024) | round(1) }} KB</td>
+                      <td>{{ file.modified.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                      <td><a class="link-button" href="{{ url_for('download_file', category='old', filename=file.name) }}">Download</a></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <div class="empty-state">No old files available.</div>
+            {% endif %}
+          </div>
+
+          <div class="file-panel">
+            <div class="panel-header">
+              <h3>Converted</h3>
+              <span class="count">{{ converted_files | length }} files</span>
+            </div>
+            <div class="panel-actions">
+              <a class="btn btn-secondary" href="{{ url_for('download_zip', category='converted') }}">Download ZIP</a>
+            </div>
+            {% if converted_files %}
+              <table class="file-table">
+                <thead>
+                  <tr><th>Name</th><th>Size</th><th>Modified</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {% for file in converted_files %}
+                    <tr>
+                      <td>{{ file.name }}</td>
+                      <td>{{ (file.size / 1024) | round(1) }} KB</td>
+                      <td>{{ file.modified.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                      <td><a class="link-button" href="{{ url_for('download_file', category='converted', filename=file.name) }}">Download</a></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <div class="empty-state">No converted files yet.</div>
+            {% endif %}
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
