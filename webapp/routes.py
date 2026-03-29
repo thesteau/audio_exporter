@@ -11,7 +11,14 @@ from .services.conversion import (
     run_conversion,
     summarize_conversion_log,
 )
-from .services.files import ensure_directories, list_directory, resolve_category_file, sanitize_filename, unique_path
+from .services.files import (
+    delete_category_file,
+    ensure_directories,
+    list_directory,
+    resolve_category_file,
+    sanitize_filename,
+    unique_path,
+)
 
 
 def register_routes(app):
@@ -42,7 +49,6 @@ def register_routes(app):
     @app.route("/upload", methods=["POST"])
     def upload():
         ensure_directories()
-        output_format = get_selected_output_format()
         if "files" not in request.files:
             flash("No files selected for upload.", "warning")
             return redirect(url_for("index"))
@@ -65,28 +71,17 @@ def register_routes(app):
             flash("No valid media files were uploaded.", "warning")
             return redirect(url_for("index"))
 
-        success, output = run_conversion(output_format)
-        converted, skipped, failed = summarize_conversion_log(output)
-        if output:
-            flash(output, "info")
-        if success:
-            flash(
-                f"{uploaded_count} file(s) uploaded. Conversion to {output_format.upper()} finished. "
-                f"{converted} converted, {skipped} skipped, {failed} failed.",
-                "success",
-            )
-        else:
-            flash(
-                f"{uploaded_count} file(s) uploaded. Conversion to {output_format.upper()} finished with errors. "
-                f"{converted} converted, {skipped} skipped, {failed} failed.",
-                "danger",
-            )
+        flash(f"{uploaded_count} file(s) uploaded and ready to convert.", "success")
         return redirect(url_for("index"))
 
     @app.route("/process", methods=["POST"])
     def process_files():
         output_format = get_selected_output_format()
         ensure_directories()
+        if not list_directory("uploaded"):
+            flash("Upload at least one file before converting.", "warning")
+            return redirect(url_for("index"))
+
         success, output = run_conversion(output_format)
         converted, skipped, failed = summarize_conversion_log(output)
         if output:
@@ -139,3 +134,17 @@ def register_routes(app):
             download_name=f"{category}.zip",
             mimetype="application/zip",
         )
+
+    @app.route("/delete/<category>/<filename>", methods=["POST"])
+    def delete_file(category: str, filename: str):
+        try:
+            deleted_file = delete_category_file(category, filename)
+        except ValueError:
+            flash("Invalid delete request.", "danger")
+        except FileNotFoundError:
+            flash("File not found.", "warning")
+        except OSError as exc:
+            flash(f"Could not delete file: {exc}", "danger")
+        else:
+            flash(f"Deleted {deleted_file.name}.", "success")
+        return redirect(url_for("index"))

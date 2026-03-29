@@ -87,3 +87,9 @@ def resolve_category_file(category: str, filename: str) -> Path:
     if not str(file_path).startswith(str(BASE_DIR.resolve())):
         raise ValueError("Invalid filename")
     return file_path
+
+
+def delete_category_file(category: str, filename: str) -> Path:
+    file_path = resolve_category_file(category, filename)
+    file_path.unlink()
+    return file_path
