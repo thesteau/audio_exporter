@@ -40,3 +40,4 @@ docker run --rm -p 8000:8000 -v ~/songs:/songs mp3-fixer
 - The app uses `/songs` inside the container.
 - Output format defaults to MP3.
 - `fix_songs.sh` handles the FFmpeg conversion work.
+- `fix_songs.sh` now retains embedded artwork by default when the input has attached cover art. Use `--drop-artwork` to disable that behavior for a run.
