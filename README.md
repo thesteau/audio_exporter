@@ -1,6 +1,6 @@
 # Audio Fixer
 
-A small Dockerized Flask app that accepts media uploads, extracts the first audio stream with FFmpeg, and writes processed output as MP3 or FLAC.
+A small Dockerized Flask app that accepts media uploads, extracts the first audio stream with FFmpeg, and writes processed output as MP3 or FLAC. 
 
 ## Storage layout
 
