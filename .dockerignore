@@ -7,3 +7,4 @@ __pycache__/
 venv/
 *.swp
 .DS_Store
+.git/
