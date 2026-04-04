@@ -38,9 +38,19 @@ docker run --rm -p 8000:8000 -v ~/songs:/songs audio-exporter
 
 Then open `http://localhost:8000`.
 
+## Run locally
+
+```bash
+pip install -r requirements.txt
+python app/app.py
+```
+
+For local runs, the app stores files in the repo's `songs/` directory by default.
+
 ## Notes
 
 - The app uses `/songs` inside the container.
+- App source files live under `app/`.
 - Output format defaults to MP3.
 - `fix_songs.sh` handles the FFmpeg conversion work.
 - `fix_songs.sh` retains embedded artwork by default when the input has attached cover art. Use `--drop-artwork` to disable that behavior for a run.

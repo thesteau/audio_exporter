@@ -5,6 +5,10 @@ from pathlib import Path
 from ..config import ALLOWED_CATEGORIES, BASE_DIR, CLEANUP_THRESHOLD_SECONDS, CONVERTED_DIR, UPLOAD_DIR
 
 
+def safe_console_text(value: str) -> str:
+    return value.encode("ascii", errors="backslashreplace").decode("ascii")
+
+
 def ensure_directories():
     for directory in (UPLOAD_DIR, CONVERTED_DIR):
         directory.mkdir(parents=True, exist_ok=True)
@@ -63,10 +67,10 @@ def cleanup_media_files():
                     path.unlink()
                     removed.append(path)
             except OSError as exc:
-                print(f"Failed to remove file {path}: {exc}")
+                print(safe_console_text(f"Failed to remove file {path}: {exc}"))
     if removed:
         removed_names = ", ".join(str(path.name) for path in removed)
-        print(f"Cleaned up media files: {removed_names}")
+        print(safe_console_text(f"Cleaned up media files: {removed_names}"))
     return removed
 
 

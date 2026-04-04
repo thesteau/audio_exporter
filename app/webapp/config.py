@@ -1,10 +1,12 @@
+import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-BASE_DIR = Path("/songs")
+DEFAULT_BASE_DIR = PROJECT_ROOT.parent / "songs"
+BASE_DIR = Path(os.environ.get("AUDIO_EXPORTER_STORAGE_DIR", DEFAULT_BASE_DIR)).resolve()
 UPLOAD_DIR = BASE_DIR / "uploaded"
 CONVERTED_DIR = BASE_DIR / "converted"
-SCRIPT_PATH = Path("/app/fix_songs.sh")
+SCRIPT_PATH = Path(os.environ.get("AUDIO_EXPORTER_SCRIPT_PATH", PROJECT_ROOT / "fix_songs.sh")).resolve()
 
 ALLOWED_CATEGORIES = {
     "uploaded": UPLOAD_DIR,

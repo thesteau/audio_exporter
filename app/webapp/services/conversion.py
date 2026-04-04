@@ -1,7 +1,8 @@
+import shutil
 import subprocess
 from pathlib import Path
 
-from ..config import DEFAULT_OUTPUT_FORMAT, OUTPUT_FORMATS, SCRIPT_PATH
+from ..config import DEFAULT_OUTPUT_FORMAT, OUTPUT_FORMATS, PROJECT_ROOT, SCRIPT_PATH
 
 
 def normalize_output_format(output_format: str | None) -> str:
@@ -43,11 +44,11 @@ def run_conversion(output_format: str = DEFAULT_OUTPUT_FORMAT):
         return False, "Conversion script not found."
     try:
         result = subprocess.run(
-            [str(SCRIPT_PATH), normalized_format],
+            build_conversion_command(normalized_format),
             capture_output=True,
             text=True,
             check=False,
-            cwd="/app",
+            cwd=str(PROJECT_ROOT),
         )
     except Exception as exc:
         return False, f"Conversion execution failure: {exc}"
@@ -78,11 +79,11 @@ def stream_conversion_events(output_format: str = DEFAULT_OUTPUT_FORMAT):
 
     try:
         process = subprocess.Popen(
-            [str(SCRIPT_PATH), normalized_format],
+            build_conversion_command(normalized_format),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            cwd="/app",
+            cwd=str(PROJECT_ROOT),
         )
     except Exception as exc:
         yield {
@@ -181,6 +182,13 @@ def parse_conversion_log_line(line: str):
         "event": "log",
         "message": line,
     }
+
+
+def build_conversion_command(output_format: str):
+    bash_path = shutil.which("bash")
+    if bash_path:
+        return [bash_path, str(SCRIPT_PATH), output_format]
+    return [str(SCRIPT_PATH), output_format]
 
 
 def summarize_conversion_log(log_text: str):
