@@ -1,14 +1,16 @@
+import json
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from flask import flash, redirect, render_template, request, send_file, url_for
+from flask import Response, flash, jsonify, redirect, render_template, request, send_file, stream_with_context, url_for
 
 from .config import ALLOWED_CATEGORIES, DEFAULT_OUTPUT_FORMAT, OUTPUT_FORMATS, ZIP_CATEGORIES
 from .services.conversion import (
     media_file_has_audio,
     normalize_output_format,
     run_conversion,
+    stream_conversion_events,
     summarize_conversion_log,
 )
 from .services.files import (
@@ -22,6 +24,75 @@ from .services.files import (
 
 
 def register_routes(app):
+    def handle_upload_request():
+        ensure_directories()
+        if "files" not in request.files:
+            return {
+                "success": False,
+                "status_code": 400,
+                "message": "No files selected for upload.",
+                "severity": "warning",
+                "results": [],
+                "uploaded_count": 0,
+                "skipped_count": 0,
+            }
+
+        files = request.files.getlist("files")
+        results = []
+        uploaded_count = 0
+
+        for index, file_storage in enumerate(files):
+            if not file_storage or file_storage.filename == "":
+                continue
+
+            source_name = file_storage.filename
+            safe_name = sanitize_filename(source_name)
+            destination = unique_path(ALLOWED_CATEGORIES["uploaded"], safe_name)
+            file_storage.save(destination)
+
+            entry = {
+                "index": index,
+                "source_name": source_name,
+                "stored_name": destination.name,
+            }
+            if not media_file_has_audio(destination):
+                destination.unlink(missing_ok=True)
+                entry["status"] = "skipped"
+                entry["reason"] = "Unsupported media file"
+                results.append(entry)
+                continue
+
+            uploaded_count += 1
+            entry["status"] = "uploaded"
+            results.append(entry)
+
+        skipped_count = sum(1 for entry in results if entry["status"] == "skipped")
+        if uploaded_count == 0:
+            message = "No valid media files were uploaded."
+            success = False
+            status_code = 400
+            severity = "warning"
+        elif skipped_count > 0:
+            message = f"{uploaded_count} file(s) uploaded. {skipped_count} skipped."
+            success = True
+            status_code = 200
+            severity = "warning"
+        else:
+            message = f"{uploaded_count} file(s) uploaded and ready to convert."
+            success = True
+            status_code = 200
+            severity = "success"
+
+        return {
+            "success": success,
+            "status_code": status_code,
+            "message": message,
+            "severity": severity,
+            "results": results,
+            "uploaded_count": uploaded_count,
+            "skipped_count": skipped_count,
+        }
+
     def render_index_page():
         ensure_directories()
         return render_template(
@@ -48,31 +119,25 @@ def register_routes(app):
 
     @app.route("/upload", methods=["POST"])
     def upload():
-        ensure_directories()
-        if "files" not in request.files:
-            flash("No files selected for upload.", "warning")
-            return redirect(url_for("index"))
-
-        files = request.files.getlist("files")
-        uploaded_count = 0
-        for file_storage in files:
-            if not file_storage or file_storage.filename == "":
-                continue
-            safe_name = sanitize_filename(file_storage.filename)
-            destination = unique_path(ALLOWED_CATEGORIES["uploaded"], safe_name)
-            file_storage.save(destination)
-            if not media_file_has_audio(destination):
-                destination.unlink(missing_ok=True)
-                flash(f"Skipped unsupported media file: {file_storage.filename}", "warning")
-                continue
-            uploaded_count += 1
-
-        if uploaded_count == 0:
-            flash("No valid media files were uploaded.", "warning")
-            return redirect(url_for("index"))
-
-        flash(f"{uploaded_count} file(s) uploaded and ready to convert.", "success")
+        upload_result = handle_upload_request()
+        for result in upload_result["results"]:
+            if result["status"] == "skipped":
+                flash(f"Skipped unsupported media file: {result['source_name']}", "warning")
+        flash(upload_result["message"], upload_result["severity"])
         return redirect(url_for("index"))
+
+    @app.route("/upload-async", methods=["POST"])
+    def upload_async():
+        upload_result = handle_upload_request()
+        response_payload = {
+            "success": upload_result["success"],
+            "message": upload_result["message"],
+            "severity": upload_result["severity"],
+            "results": upload_result["results"],
+            "uploaded_count": upload_result["uploaded_count"],
+            "skipped_count": upload_result["skipped_count"],
+        }
+        return jsonify(response_payload), upload_result["status_code"]
 
     @app.route("/process", methods=["POST"])
     def process_files():
@@ -97,6 +162,25 @@ def register_routes(app):
                 "danger",
             )
         return redirect(url_for("index"))
+
+    @app.route("/process-stream", methods=["POST"])
+    def process_files_stream():
+        output_format = get_selected_output_format()
+        ensure_directories()
+        if not list_directory("uploaded"):
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "Upload at least one file before converting.",
+                }
+            ), 400
+
+        @stream_with_context
+        def generate():
+            for event in stream_conversion_events(output_format):
+                yield f"{json.dumps(event)}\n"
+
+        return Response(generate(), mimetype="application/x-ndjson")
 
     @app.route("/download/<category>/<filename>", methods=["GET"])
     def download_file(category: str, filename: str):
