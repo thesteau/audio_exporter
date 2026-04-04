@@ -18,7 +18,7 @@ In this repo, the mounted host folder is `songs/`.
 - Keeps original uploads in `uploaded` and writes processed files into `converted`.
 - Provides individual downloads for uploaded and processed files.
 - Provides ZIP download for processed files.
-- Cleans up files older than six hours from both storage folders.
+- Removes files older than six hours from both storage folders, with cleanup checks running hourly.
 
 ## Run with Docker Compose
 
@@ -40,4 +40,4 @@ docker run --rm -p 8000:8000 -v ~/songs:/songs mp3-fixer
 - The app uses `/songs` inside the container.
 - Output format defaults to MP3.
 - `fix_songs.sh` handles the FFmpeg conversion work.
-- `fix_songs.sh` now retains embedded artwork by default when the input has attached cover art. Use `--drop-artwork` to disable that behavior for a run.
+- `fix_songs.sh` retains embedded artwork by default when the input has attached cover art. Use `--drop-artwork` to disable that behavior for a run.
