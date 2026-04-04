@@ -228,6 +228,47 @@ document.addEventListener("DOMContentLoaded", () => {
     }, delay);
   };
 
+  const syncConvertAvailability = (nextDocument) => {
+    if (!convertSubmit) {
+      return;
+    }
+
+    const nextConvertSubmit = nextDocument.querySelector("[data-convert-submit]");
+    if (!nextConvertSubmit) {
+      return;
+    }
+
+    convertSubmit.disabled = nextConvertSubmit.disabled;
+  };
+
+  const syncFilePanels = (nextDocument) => {
+    const currentGrid = document.querySelector(".file-grid");
+    const nextGrid = nextDocument.querySelector(".file-grid");
+    if (!currentGrid || !nextGrid) {
+      return;
+    }
+
+    currentGrid.replaceWith(nextGrid);
+  };
+
+  const refreshPageState = async () => {
+    const response = await fetch(window.location.pathname, {
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error("The page could not be refreshed.");
+    }
+
+    const html = await response.text();
+    const parser = new DOMParser();
+    const nextDocument = parser.parseFromString(html, "text/html");
+
+    syncFilePanels(nextDocument);
+    syncConvertAvailability(nextDocument);
+  };
+
   const handleUploadFailure = (activity, files, message) => {
     files.forEach((file, index) => {
       setFileStatus(activity, String(index), {
@@ -387,7 +428,7 @@ document.addEventListener("DOMContentLoaded", () => {
         setButtonBusy(convertSubmit, false, "Convert Uploaded Files");
       });
 
-      xhr.addEventListener("load", () => {
+      xhr.addEventListener("load", async () => {
         let payload = null;
         try {
           payload = JSON.parse(xhr.responseText || "{}");
@@ -453,8 +494,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
         fileInput.value = "";
         updateSummary(fileInput.files);
-        dismissActivity(activity, 6600);
-        window.setTimeout(() => window.location.reload(), 6400);
+        setButtonBusy(uploadSubmit, false, "Uploading...");
+        setButtonBusy(convertSubmit, false, "Convert Uploaded Files");
+
+        try {
+          await refreshPageState();
+        } catch (error) {
+          showFlashToast("warning", error.message || "Uploaded, but the file list could not be refreshed.");
+        }
+
+        dismissActivity(activity, 3200);
       });
 
       xhr.send(new FormData(uploadForm));
@@ -632,8 +681,17 @@ document.addEventListener("DOMContentLoaded", () => {
               badgeText: tone === "success" ? "Done" : tone === "warning" ? "Mixed" : "Error",
             });
 
-            dismissActivity(activity, 6700);
-            window.setTimeout(() => window.location.reload(), 6500);
+            setButtonBusy(uploadSubmit, false, "Upload Files");
+            setButtonBusy(convertSubmit, false, "Converting...");
+            if (formatSelect) {
+              formatSelect.disabled = false;
+            }
+
+            void refreshPageState().catch((error) => {
+              showFlashToast("warning", error.message || "Processing finished, but the file list could not be refreshed.");
+            });
+
+            dismissActivity(activity, 3200);
           }
         };
 
