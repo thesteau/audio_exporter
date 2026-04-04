@@ -24,28 +24,10 @@ In this repo, the mounted host folder is `songs/`.
 ## Run with Docker Compose
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
 The compose file mounts `./songs` on the host to `/songs` in the container and publishes the app at `http://localhost:7160`.
-
-## Run with Docker directly
-
-```bash
-docker build -t audio-exporter .
-docker run --rm -p 8000:8000 -v ~/songs:/songs audio-exporter
-```
-
-Then open `http://localhost:8000`.
-
-## Run locally
-
-```bash
-pip install -r requirements.txt
-python app/app.py
-```
-
-For local runs, the app stores files in the repo's `songs/` directory by default.
 
 ## Notes
 
