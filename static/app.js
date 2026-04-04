@@ -7,6 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const uploadSubmit = document.querySelector("[data-upload-submit]");
   const convertSubmit = document.querySelector("[data-convert-submit]");
   const activityTray = document.querySelector("[data-activity-tray]");
+  const serverFlashes = document.querySelector("[data-server-flashes]");
 
   const uploadedFileRows = () => Array.from(document.querySelectorAll("[data-uploaded-file-row]"));
   const formatSelect = convertForm?.querySelector('select[name="output_format"]') ?? null;
@@ -64,7 +65,7 @@ document.addEventListener("DOMContentLoaded", () => {
     button.textContent = isBusy ? busyText : button.dataset.defaultLabel;
   };
 
-  const createActivity = ({ title, detail, tone = "running" }) => {
+  const createActivity = ({ title, detail, tone = "running", showProgress = true, showList = true }) => {
     if (!activityTray) {
       return null;
     }
@@ -101,7 +102,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const list = document.createElement("ul");
     list.className = "activity-file-list";
 
-    card.append(header, detailElement, progress, list);
+    if (!showProgress) {
+      card.classList.add("has-no-progress");
+    }
+    if (!showList) {
+      card.classList.add("has-no-list");
+    }
+
+    card.append(header, detailElement);
+    if (showProgress) {
+      card.append(progress);
+    }
+    if (showList) {
+      card.append(list);
+    }
     activityTray.append(card);
 
     return {
@@ -229,6 +243,44 @@ document.addEventListener("DOMContentLoaded", () => {
       tone: "error",
       badgeText: "Error",
     });
+  };
+
+  const showFlashToast = (category, message) => {
+    const toneMap = {
+      success: "success",
+      warning: "warning",
+      danger: "error",
+      info: "running",
+    };
+    const badgeMap = {
+      success: "Done",
+      warning: "Check",
+      danger: "Error",
+      info: "Notice",
+    };
+    const titleMap = {
+      success: "Update",
+      warning: "Attention",
+      danger: "Problem",
+      info: "Update",
+    };
+    const activity = createActivity({
+      title: titleMap[category] || "Update",
+      detail: message,
+      tone: toneMap[category] || "running",
+      showProgress: false,
+      showList: false,
+    });
+
+    if (!activity) {
+      return;
+    }
+
+    updateActivity(activity, {
+      tone: toneMap[category] || "running",
+      badgeText: badgeMap[category] || "Notice",
+    });
+    dismissActivity(activity, category === "danger" ? 4200 : 3000);
   };
 
   if (dropzone && fileInput) {
@@ -401,8 +453,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
         fileInput.value = "";
         updateSummary(fileInput.files);
-        dismissActivity(activity, 1600);
-        window.setTimeout(() => window.location.reload(), 1400);
+        dismissActivity(activity, 6600);
+        window.setTimeout(() => window.location.reload(), 6400);
       });
 
       xhr.send(new FormData(uploadForm));
@@ -580,8 +632,8 @@ document.addEventListener("DOMContentLoaded", () => {
               badgeText: tone === "success" ? "Done" : tone === "warning" ? "Mixed" : "Error",
             });
 
-            dismissActivity(activity, 1700);
-            window.setTimeout(() => window.location.reload(), 1500);
+            dismissActivity(activity, 6700);
+            window.setTimeout(() => window.location.reload(), 6500);
           }
         };
 
@@ -629,6 +681,16 @@ document.addEventListener("DOMContentLoaded", () => {
         if (formatSelect) {
           formatSelect.disabled = false;
         }
+      }
+    });
+  }
+
+  if (serverFlashes) {
+    serverFlashes.querySelectorAll("[data-flash-category]").forEach((flashElement) => {
+      const category = flashElement.dataset.flashCategory || "info";
+      const message = flashElement.textContent.trim();
+      if (message) {
+        showFlashToast(category, message);
       }
     });
   }

@@ -13,6 +13,10 @@ body {
   padding: 24px;
 }
 
+.js .flash-list {
+  display: none;
+}
+
 main {
   position: relative;
 }
@@ -44,6 +48,14 @@ main {
   opacity: 0;
   transform: translateY(-8px) scale(0.98);
   transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+.activity-card.has-no-progress .activity-detail {
+  margin-bottom: 0;
+}
+
+.activity-card.has-no-list .activity-detail:last-child {
+  margin-bottom: 0;
 }
 
 .activity-card.is-running {
