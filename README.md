@@ -1,6 +1,6 @@
-# Audio Fixer
+# Audio Exporter
 
-A small Dockerized Flask app that accepts media uploads, extracts the first audio stream with FFmpeg, and writes processed output as MP3 or FLAC. 
+A Dockerized Flask app for uploading audio or video files, validating that they contain an audio stream, and exporting the result as MP3 or FLAC with FFmpeg.
 
 ## Storage layout
 
@@ -14,10 +14,11 @@ In this repo, the mounted host folder is `songs/`.
 ## What it does
 
 - Accepts audio files and video files that contain at least one audio stream.
+- Rejects unsupported uploads before they are added to the queue.
 - Lets the user choose the output format: MP3 or FLAC.
-- Keeps original uploads in `uploaded` and writes processed files into `converted`.
-- Provides individual downloads for uploaded and processed files.
-- Provides ZIP download for processed files.
+- Keeps original uploads in `uploaded` and writes converted files into `converted`.
+- Supports individual downloads, deletion, and ZIP download for processed files.
+- Shows upload and conversion activity in the web UI, including streamed conversion progress.
 - Removes files older than six hours from both storage folders, with cleanup checks running hourly.
 
 ## Run with Docker Compose
@@ -26,14 +27,16 @@ In this repo, the mounted host folder is `songs/`.
 docker compose up --build
 ```
 
-The compose file mounts `./songs` on the host to `/songs` in the container.
+The compose file mounts `./songs` on the host to `/songs` in the container and publishes the app at `http://localhost:7160`.
 
 ## Run with Docker directly
 
 ```bash
-docker build -t mp3-fixer .
-docker run --rm -p 8000:8000 -v ~/songs:/songs mp3-fixer
+docker build -t audio-exporter .
+docker run --rm -p 8000:8000 -v ~/songs:/songs audio-exporter
 ```
+
+Then open `http://localhost:8000`.
 
 ## Notes
 
