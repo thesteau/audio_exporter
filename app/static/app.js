@@ -19,7 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (!files || files.length === 0) {
-      summary.textContent = "No files selected yet.";
+      summary.textContent = "No files selected";
       return;
     }
 
@@ -267,7 +267,84 @@ document.addEventListener("DOMContentLoaded", () => {
 
     syncFilePanels(nextDocument);
     syncConvertAvailability(nextDocument);
+    readServerClock();
+    updateRetention();
   };
+
+  // Retention tags: server renders epoch seconds; we tick them locally, corrected for clock skew.
+  let serverClockOffset = 0;
+  let retentionRefreshPending = false;
+
+  const readServerClock = () => {
+    const grid = document.querySelector("[data-file-grid]");
+    const serverNow = Number(grid?.dataset.serverNow);
+    if (Number.isFinite(serverNow)) {
+      serverClockOffset = serverNow * 1000 - Date.now();
+    }
+  };
+
+  const formatRemaining = (seconds) => {
+    const totalMinutes = Math.max(0, Math.floor(seconds / 60));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours) {
+      return `${hours}h ${minutes}m`;
+    }
+    return minutes ? `${minutes}m` : "<1m";
+  };
+
+  const retentionLabels = { active: "Active", expiring: "Expiring", deleting: "Deleting" };
+
+  const updateRetention = () => {
+    const grid = document.querySelector("[data-file-grid]");
+    if (!grid) {
+      return;
+    }
+
+    const warning = Number(grid.dataset.expiryWarning);
+    const critical = Number(grid.dataset.expiryCritical);
+    const now = (Date.now() + serverClockOffset) / 1000;
+    let anyGone = false;
+
+    grid.querySelectorAll("[data-retention]").forEach((cell) => {
+      const expiresAt = Number(cell.dataset.expiresAt);
+      const deleteAt = Number(cell.dataset.deleteAt);
+      const remaining = expiresAt - now;
+      const state = remaining <= critical ? "deleting" : remaining <= warning ? "expiring" : "active";
+
+      const tag = cell.querySelector("[data-retention-tag]");
+      if (tag) {
+        tag.className = `tag tag-${state}`;
+        tag.textContent = retentionLabels[state];
+      }
+      const remainingElement = cell.querySelector("[data-retention-remaining]");
+      if (remainingElement) {
+        remainingElement.textContent = formatRemaining(deleteAt - now);
+      }
+      const deleteDate = new Date(deleteAt * 1000 - serverClockOffset);
+      cell.title = `Deleted around ${deleteDate.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
+
+      if (deleteAt <= now) {
+        anyGone = true;
+      }
+    });
+
+    // A sweep has likely run: pull the fresh list so deleted files disappear.
+    if (anyGone && !retentionRefreshPending && !document.hidden) {
+      retentionRefreshPending = true;
+      window.setTimeout(() => {
+        refreshPageState()
+          .catch(() => {})
+          .finally(() => {
+            retentionRefreshPending = false;
+          });
+      }, 15000);
+    }
+  };
+
+  readServerClock();
+  updateRetention();
+  window.setInterval(updateRetention, 30000);
 
   const handleUploadFailure = (activity, files, message) => {
     files.forEach((file, index) => {
@@ -380,7 +457,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       setButtonBusy(uploadSubmit, true, "Uploading...");
-      setButtonBusy(convertSubmit, true, "Convert Uploaded Files");
+      setButtonBusy(convertSubmit, true, "Convert");
 
       const xhr = new XMLHttpRequest();
       xhr.open("POST", uploadForm.dataset.uploadAsyncUrl || uploadForm.action);
@@ -425,7 +502,7 @@ document.addEventListener("DOMContentLoaded", () => {
       xhr.addEventListener("error", () => {
         handleUploadFailure(activity, files, "Upload failed. Please try again.");
         setButtonBusy(uploadSubmit, false, "Uploading...");
-        setButtonBusy(convertSubmit, false, "Convert Uploaded Files");
+        setButtonBusy(convertSubmit, false, "Convert");
       });
 
       xhr.addEventListener("load", async () => {
@@ -439,7 +516,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!payload) {
           handleUploadFailure(activity, files, "Upload finished, but the server response could not be read.");
           setButtonBusy(uploadSubmit, false, "Uploading...");
-          setButtonBusy(convertSubmit, false, "Convert Uploaded Files");
+          setButtonBusy(convertSubmit, false, "Convert");
           return;
         }
 
@@ -488,14 +565,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (!payload.success) {
           setButtonBusy(uploadSubmit, false, "Uploading...");
-          setButtonBusy(convertSubmit, false, "Convert Uploaded Files");
+          setButtonBusy(convertSubmit, false, "Convert");
           return;
         }
 
         fileInput.value = "";
         updateSummary(fileInput.files);
         setButtonBusy(uploadSubmit, false, "Uploading...");
-        setButtonBusy(convertSubmit, false, "Convert Uploaded Files");
+        setButtonBusy(convertSubmit, false, "Convert");
 
         try {
           await refreshPageState();
@@ -547,7 +624,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
       });
 
-      setButtonBusy(uploadSubmit, true, "Upload Files");
+      setButtonBusy(uploadSubmit, true, "Upload");
       setButtonBusy(convertSubmit, true, "Converting...");
       if (formatSelect) {
         formatSelect.disabled = true;
@@ -666,6 +743,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
           if (payload.event === "complete") {
             sawCompleteEvent = true;
+            let unprocessed = 0;
+            if (payload.success) {
+              pendingFiles.forEach((fileName) => {
+                if (!completedFiles.has(fileName)) {
+                  unprocessed += 1;
+                  setFileStatus(activity, fileName, {
+                    label: fileName,
+                    tone: "error",
+                    detail: "Not processed by this run",
+                    statusText: "Missed",
+                  });
+                }
+              });
+            }
+            if (unprocessed > 0) {
+              payload.failed += unprocessed;
+              payload.message = `${payload.message} ${unprocessed} not processed.`;
+            }
             const tone = payload.success
               ? payload.failed > 0
                 ? "error"
@@ -681,7 +776,7 @@ document.addEventListener("DOMContentLoaded", () => {
               badgeText: tone === "success" ? "Done" : tone === "warning" ? "Mixed" : "Error",
             });
 
-            setButtonBusy(uploadSubmit, false, "Upload Files");
+            setButtonBusy(uploadSubmit, false, "Upload");
             setButtonBusy(convertSubmit, false, "Converting...");
             if (formatSelect) {
               formatSelect.disabled = false;
@@ -734,7 +829,7 @@ document.addEventListener("DOMContentLoaded", () => {
           tone: "error",
           badgeText: "Error",
         });
-        setButtonBusy(uploadSubmit, false, "Upload Files");
+        setButtonBusy(uploadSubmit, false, "Upload");
         setButtonBusy(convertSubmit, false, "Converting...");
         if (formatSelect) {
           formatSelect.disabled = false;

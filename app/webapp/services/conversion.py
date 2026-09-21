@@ -1,8 +1,34 @@
+import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
-from ..config import DEFAULT_OUTPUT_FORMAT, OUTPUT_FORMATS, PROJECT_ROOT, SCRIPT_PATH
+from ..config import DEFAULT_OUTPUT_FORMAT, GUARD_BIN_DIR, OUTPUT_FORMATS, PROJECT_ROOT, SCRIPT_PATH
+
+# Only one conversion pass at a time: concurrent passes would write the same outputs.
+_conversion_lock = threading.Lock()
+BUSY_MESSAGE = "A conversion is already running. Wait for it to finish."
+
+
+def conversion_in_progress() -> bool:
+    return _conversion_lock.locked()
+
+
+def _conversion_env():
+    # bin/ffmpeg wraps the real ffmpeg with -nostdin so fix_songs.sh's read loop keeps its input.
+    return {**os.environ, "PATH": f"{GUARD_BIN_DIR}{os.pathsep}{os.environ.get('PATH', '')}"}
+
+
+def _finish_in_background(process: subprocess.Popen):
+    """Keep a pass running after the client disconnects, then release the lock."""
+    try:
+        if process.stdout is not None:
+            for _ in process.stdout:
+                pass
+        process.wait()
+    finally:
+        _conversion_lock.release()
 
 
 def normalize_output_format(output_format: str | None) -> str:
@@ -42,6 +68,8 @@ def run_conversion(output_format: str = DEFAULT_OUTPUT_FORMAT):
     normalized_format = normalize_output_format(output_format)
     if not SCRIPT_PATH.exists():
         return False, "Conversion script not found."
+    if not _conversion_lock.acquire(blocking=False):
+        return False, BUSY_MESSAGE
     try:
         result = subprocess.run(
             build_conversion_command(normalized_format),
@@ -49,9 +77,12 @@ def run_conversion(output_format: str = DEFAULT_OUTPUT_FORMAT):
             text=True,
             check=False,
             cwd=str(PROJECT_ROOT),
+            env=_conversion_env(),
         )
     except Exception as exc:
         return False, f"Conversion execution failure: {exc}"
+    finally:
+        _conversion_lock.release()
 
     output = result.stdout.strip()
     if result.stderr.strip():
@@ -77,19 +108,8 @@ def stream_conversion_events(output_format: str = DEFAULT_OUTPUT_FORMAT):
         }
         return
 
-    try:
-        process = subprocess.Popen(
-            build_conversion_command(normalized_format),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            cwd=str(PROJECT_ROOT),
-        )
-    except Exception as exc:
-        yield {
-            "event": "error",
-            "message": f"Conversion execution failure: {exc}",
-        }
+    if not _conversion_lock.acquire(blocking=False):
+        yield {"event": "error", "message": BUSY_MESSAGE}
         yield {
             "event": "complete",
             "success": False,
@@ -97,28 +117,63 @@ def stream_conversion_events(output_format: str = DEFAULT_OUTPUT_FORMAT):
             "skipped": 0,
             "failed": 0,
             "output_format": normalized_format,
-            "message": f"Processing could not start: {exc}",
+            "message": BUSY_MESSAGE,
         }
         return
 
-    collected_lines = []
-    yield {
-        "event": "start",
-        "output_format": normalized_format,
-        "message": f"Processing to {normalized_format.upper()} started.",
-    }
+    process = None
+    try:
+        try:
+            process = subprocess.Popen(
+                build_conversion_command(normalized_format),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                text=True,
+                cwd=str(PROJECT_ROOT),
+                env=_conversion_env(),
+            )
+        except Exception as exc:
+            yield {
+                "event": "error",
+                "message": f"Conversion execution failure: {exc}",
+            }
+            yield {
+                "event": "complete",
+                "success": False,
+                "converted": 0,
+                "skipped": 0,
+                "failed": 0,
+                "output_format": normalized_format,
+                "message": f"Processing could not start: {exc}",
+            }
+            return
 
-    if process.stdout is not None:
-        for raw_line in process.stdout:
-            line = raw_line.strip()
-            if not line:
-                continue
-            collected_lines.append(line)
-            line_event = parse_conversion_log_line(line)
-            line_event["raw"] = line
-            yield line_event
+        collected_lines = []
+        yield {
+            "event": "start",
+            "output_format": normalized_format,
+            "message": f"Processing to {normalized_format.upper()} started.",
+        }
 
-    return_code = process.wait()
+        if process.stdout is not None:
+            for raw_line in process.stdout:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                collected_lines.append(line)
+                line_event = parse_conversion_log_line(line)
+                line_event["raw"] = line
+                yield line_event
+
+        return_code = process.wait()
+    finally:
+        if process is not None and process.poll() is None:
+            # Client went away mid-pass (tab closed, refresh): let the pass finish.
+            threading.Thread(target=_finish_in_background, args=(process,), daemon=True).start()
+        else:
+            _conversion_lock.release()
+
     joined_output = "\n".join(collected_lines)
     converted, skipped, failed = summarize_conversion_log(joined_output)
     summary_message = (

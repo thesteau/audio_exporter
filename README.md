@@ -19,7 +19,8 @@ In this repo, the mounted host folder is `songs/`.
 - Keeps original uploads in `uploaded` and writes converted files into `converted`.
 - Supports individual downloads, deletion, and ZIP download for processed files.
 - Shows upload and conversion activity in the web UI, including streamed conversion progress.
-- Removes files older than six hours from both storage folders, with cleanup checks running hourly.
+- Removes files older than six hours from both storage folders, with cleanup checks running hourly. Each file shows a retention tag: Active, Expiring (under 2h left) or Deleting (under 1h left, removed at the next sweep).
+- Runs one conversion pass at a time; a pass keeps running if the browser tab is closed.
 
 ## Run with Docker Compose
 
@@ -31,7 +32,9 @@ The compose file mounts `./songs` on the host to `/songs` in the container and p
 
 ## Notes
 
-- The app uses `/songs` inside the container.
+- The app uses `/songs` inside the container (`AUDIO_EXPORTER_STORAGE_DIR`).
+- Uploads are staged in `/songs/.incoming` until validated, so a conversion never picks up a half-written file.
+- The app runs `fix_songs.sh` with `app/bin` first on `PATH`; `app/bin/ffmpeg` wraps the real ffmpeg with `-nostdin` so it cannot consume the script's file list.
 - App source files live under `app/`.
 - Output format defaults to MP3.
 - `fix_songs.sh` handles the FFmpeg conversion work.
