@@ -28,11 +28,6 @@ KNOWN_EXTENSIONS = (
     ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm", ".wmv", ".flv", ".mpeg", ".mpg",
 )
 
-# Uploads are sent one file per request, so this caps a single file.
-MAX_UPLOAD_BYTES = int(os.environ.get("AUDIO_EXPORTER_MAX_UPLOAD_MB", "2048")) * 1024 * 1024
-# Refuse uploads that would leave less than this free on the storage volume.
-MIN_FREE_BYTES = int(os.environ.get("AUDIO_EXPORTER_MIN_FREE_MB", "1024")) * 1024 * 1024
-
 CLEANUP_THRESHOLD_SECONDS = 6 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
 # Retention tag thresholds, measured against the file's 6-hour lifetime.

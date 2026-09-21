@@ -33,7 +33,10 @@
         <thead>
           <tr>
             <th>Name</th>
-            <th>Size</th>
+            {% if category == 'uploaded' %}
+              <th>Status {{ help("Ready: will be converted to the selected format. Done: already has an output in that format.") }}</th>
+            {% endif %}
+            <th class="size-col">Size</th>
             <th>Deletes in {{ help("Removed " ~ retention_hours ~ "h after upload or conversion, at the next cleanup sweep (every " ~ sweep_minutes ~ " min). Active: plenty of time. Expiring: under " ~ (expiry_warning // 3600) ~ "h left. Deleting: goes at the next sweep.") }}</th>
             <th><span class="visually-hidden">Actions</span></th>
           </tr>
@@ -42,7 +45,13 @@
           {% for file in files %}
             <tr {% if category == 'uploaded' %}data-uploaded-file-row{% endif %} data-file-name="{{ file.name }}">
               <td class="name-cell" title="{{ file.name }}">{{ file.name }}</td>
-              <td class="nowrap">{{ file.size | filesize }}</td>
+              {% if category == 'uploaded' %}
+                {% set is_done = default_output_format in file.outputs %}
+                <td data-conversion-state data-outputs="{{ file.outputs | join(' ') }}">
+                  <span class="tag {{ 'tag-done' if is_done else 'tag-ready' }}">{{ 'Done' if is_done else 'Ready' }}</span>
+                </td>
+              {% endif %}
+              <td class="nowrap size-col">{{ file.size | filesize }}</td>
               {{ retention_cell(file) }}
               <td>
                 <div class="table-actions">
@@ -89,19 +98,20 @@
             enctype="multipart/form-data"
             data-upload-form
             data-upload-async-url="{{ url_for('upload_async') }}"
-            data-max-upload-bytes="{{ max_upload_bytes }}"
           >
             <div class="section-heading">
               <h2>Upload</h2>
-              {{ help("Audio or video files, up to " ~ (max_upload_bytes | filesize) ~ " each. Anything without an audio track is rejected. Upload first, then convert.") }}
+              {{ help("Audio or video files. Anything without an audio track is rejected. Upload first, then convert.") }}
             </div>
             <label class="dropzone" for="files" data-dropzone>
               <input type="file" id="files" name="files" accept="audio/*,video/*" multiple data-file-input />
               <span class="dropzone-title">Drop files or click to browse</span>
               <span class="dropzone-summary" data-file-summary>No files selected</span>
             </label>
+            <ul class="selection-list" data-selection-list hidden></ul>
             <div class="button-row">
-              <button type="submit" class="btn btn-primary" data-upload-submit>Upload</button>
+              <button type="submit" class="btn btn-primary" data-upload-submit data-default-label="Upload">Upload</button>
+              <button type="button" class="btn btn-secondary" data-selection-clear hidden>Clear</button>
             </div>
           </form>
           <form
