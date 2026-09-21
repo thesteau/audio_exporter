@@ -1,5 +1,4 @@
 import json
-import shutil
 import time
 from pathlib import Path
 
@@ -7,14 +6,12 @@ from flask import Response, flash, jsonify, redirect, render_template, request, 
 
 from .config import (
     ALLOWED_CATEGORIES,
-    BASE_DIR,
     CLEANUP_INTERVAL_SECONDS,
+    CONVERTED_DIR,
     CLEANUP_THRESHOLD_SECONDS,
     DEFAULT_OUTPUT_FORMAT,
     EXPIRY_CRITICAL_SECONDS,
     EXPIRY_WARNING_SECONDS,
-    MAX_UPLOAD_BYTES,
-    MIN_FREE_BYTES,
     OUTPUT_FORMATS,
     ZIP_CATEGORIES,
 )
@@ -30,6 +27,7 @@ from .services.conversion import (
 )
 from .services.files import (
     commit_upload,
+    converted_name_for,
     delete_category_file,
     ensure_directories,
     list_directory,
@@ -55,6 +53,13 @@ def list_with_retention(category: str, now: float):
         entry["expires_at"] = entry["modified_ts"] + CLEANUP_THRESHOLD_SECONDS
         entry["delete_at"] = estimate_deletion_time(entry["modified_ts"])
         entry["retention"] = retention_state(entry["expires_at"], now)
+        if category == "uploaded":
+            # Formats this upload already has an output for; the rest are ready to convert.
+            entry["outputs"] = [
+                output_format
+                for output_format in OUTPUT_FORMATS
+                if (CONVERTED_DIR / converted_name_for(entry["name"], output_format)).exists()
+            ]
     return files
 
 
@@ -78,26 +83,8 @@ def register_routes(app):
     app.jinja_env.filters["filesize"] = format_bytes
     app.jinja_env.filters["remaining"] = format_remaining
 
-    def upload_rejection(status_code: int, message: str):
-        return {
-            "success": False,
-            "status_code": status_code,
-            "message": message,
-            "severity": "danger",
-            "results": [],
-            "uploaded_count": 0,
-            "skipped_count": 0,
-        }
-
     def handle_upload_request():
         ensure_directories()
-        # Check before touching request.files, which would read the whole body to disk.
-        incoming_bytes = request.content_length or 0
-        if incoming_bytes > MAX_UPLOAD_BYTES:
-            return upload_rejection(413, f"File too large. Limit is {format_bytes(MAX_UPLOAD_BYTES)}.")
-        free_bytes = shutil.disk_usage(BASE_DIR).free
-        if free_bytes - incoming_bytes < MIN_FREE_BYTES:
-            return upload_rejection(507, f"Not enough disk space on the server ({format_bytes(free_bytes)} free).")
         if "files" not in request.files:
             return {
                 "success": False,
@@ -181,7 +168,6 @@ def register_routes(app):
             expiry_warning=EXPIRY_WARNING_SECONDS,
             expiry_critical=EXPIRY_CRITICAL_SECONDS,
             conversion_running=conversion_in_progress(),
-            max_upload_bytes=MAX_UPLOAD_BYTES,
         )
 
     def get_selected_output_format() -> str:

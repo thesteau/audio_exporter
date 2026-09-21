@@ -13,24 +13,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const formatSelect = convertForm?.querySelector('select[name="output_format"]') ?? null;
   let activityCount = 0;
 
-  const updateSummary = (files) => {
-    if (!summary) {
-      return;
-    }
-
-    if (!files || files.length === 0) {
-      summary.textContent = "No files selected";
-      return;
-    }
-
-    if (files.length === 1) {
-      summary.textContent = `Selected: ${files[0].name}`;
-      return;
-    }
-
-    summary.textContent = `${files.length} files selected.`;
-  };
-
   const formatBytes = (bytes) => {
     if (!Number.isFinite(bytes) || bytes <= 0) {
       return "0 B";
@@ -228,17 +210,29 @@ document.addEventListener("DOMContentLoaded", () => {
     }, delay);
   };
 
-  const syncConvertAvailability = (nextDocument) => {
-    if (!convertSubmit) {
+  // Ready/Done tags follow the selected format; the Convert button shows how many are Ready.
+  let convertBusy = false;
+  const updateConvertState = () => {
+    const outputFormat = formatSelect?.value;
+    let readyCount = 0;
+    document.querySelectorAll("[data-conversion-state]").forEach((cell) => {
+      const isDone = (cell.dataset.outputs || "").split(" ").includes(outputFormat);
+      if (!isDone) {
+        readyCount += 1;
+      }
+      const tag = cell.querySelector(".tag");
+      if (tag) {
+        tag.className = `tag ${isDone ? "tag-done" : "tag-ready"}`;
+        tag.textContent = isDone ? "Done" : "Ready";
+      }
+    });
+
+    if (!convertSubmit || convertBusy) {
       return;
     }
-
-    const nextConvertSubmit = nextDocument.querySelector("[data-convert-submit]");
-    if (!nextConvertSubmit) {
-      return;
-    }
-
-    convertSubmit.disabled = nextConvertSubmit.disabled;
+    const running = document.querySelector("[data-file-grid]")?.dataset.conversionRunning === "true";
+    convertSubmit.textContent = running ? "Converting..." : readyCount ? `Convert ${readyCount}` : "Convert";
+    convertSubmit.disabled = running || uploading || readyCount === 0;
   };
 
   const syncFilePanels = (nextDocument) => {
@@ -266,7 +260,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const nextDocument = parser.parseFromString(html, "text/html");
 
     syncFilePanels(nextDocument);
-    syncConvertAvailability(nextDocument);
+    updateConvertState();
     readServerClock();
     updateRetention();
   };
@@ -384,67 +378,155 @@ document.addEventListener("DOMContentLoaded", () => {
     dismissActivity(activity, category === "danger" ? 4200 : 3000);
   };
 
+  // Files picked for upload live here, not in the <input>: picking again adds to the list,
+  // and an upload in progress never depends on what the input currently holds.
+  const selectionList = document.querySelector("[data-selection-list]");
+  const selectionClear = document.querySelector("[data-selection-clear]");
+  const selection = [];
+  let uploading = false;
+
+  const fileKey = (file) => `${file.name}|${file.size}|${file.lastModified}`;
+
+  const renderSelection = () => {
+    const totalBytes = selection.reduce((sum, entry) => sum + entry.file.size, 0);
+    if (summary) {
+      summary.textContent = selection.length
+        ? `${selection.length} file(s) ready to upload · ${formatBytes(totalBytes)}`
+        : "No files selected";
+    }
+    if (selectionList) {
+      selectionList.hidden = selection.length === 0;
+    }
+    if (selectionClear) {
+      selectionClear.hidden = selection.length === 0 || uploading;
+    }
+    if (uploadSubmit && !uploading) {
+      uploadSubmit.textContent = selection.length ? `Upload ${selection.length}` : "Upload";
+      uploadSubmit.dataset.defaultLabel = uploadSubmit.textContent;
+    }
+  };
+
+  const setSelectionState = (entry, state, metaText) => {
+    entry.item.classList.remove("is-sending", "is-failed");
+    if (state) {
+      entry.item.classList.add(`is-${state}`);
+    }
+    entry.meta.textContent = metaText;
+  };
+
+  const removeFromSelection = (entry) => {
+    const index = selection.indexOf(entry);
+    if (index !== -1) {
+      selection.splice(index, 1);
+    }
+    entry.item.remove();
+    renderSelection();
+  };
+
+  const addToSelection = (fileList) => {
+    const known = new Set(selection.map((entry) => fileKey(entry.file)));
+    Array.from(fileList || []).forEach((file) => {
+      if (known.has(fileKey(file))) {
+        return;
+      }
+      known.add(fileKey(file));
+
+      const item = document.createElement("li");
+      item.className = "selection-item";
+      const name = document.createElement("span");
+      name.className = "selection-name";
+      name.textContent = file.name;
+      name.title = file.name;
+      const meta = document.createElement("span");
+      meta.className = "selection-meta";
+      meta.textContent = formatBytes(file.size);
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "selection-remove";
+      removeButton.textContent = "×";
+      removeButton.setAttribute("aria-label", `Remove ${file.name}`);
+
+      const entry = { file, item, meta, removeButton };
+      removeButton.addEventListener("click", () => removeFromSelection(entry));
+      item.append(name, meta, removeButton);
+      selectionList?.append(item);
+      selection.push(entry);
+    });
+    renderSelection();
+  };
+
+  const setUploadLocked = (locked) => {
+    uploading = locked;
+    dropzone?.classList.toggle("is-locked", locked);
+    if (fileInput) {
+      fileInput.disabled = locked;
+    }
+    selection.forEach((entry) => {
+      entry.removeButton.disabled = locked;
+    });
+    if (uploadSubmit) {
+      uploadSubmit.disabled = locked;
+      if (locked) {
+        uploadSubmit.textContent = "Uploading...";
+      }
+    }
+    renderSelection();
+    updateConvertState();
+  };
+
   if (dropzone && fileInput) {
     ["dragenter", "dragover"].forEach((eventName) => {
       dropzone.addEventListener(eventName, (event) => {
         event.preventDefault();
-        dropzone.classList.add("is-active");
+        if (!uploading) {
+          dropzone.classList.add("is-active");
+        }
       });
     });
 
     ["dragleave", "drop"].forEach((eventName) => {
       dropzone.addEventListener(eventName, (event) => {
         event.preventDefault();
-        if (eventName === "drop") {
-          fileInput.files = event.dataTransfer.files;
-          updateSummary(fileInput.files);
-        }
         dropzone.classList.remove("is-active");
+        if (eventName === "drop" && !uploading) {
+          addToSelection(event.dataTransfer?.files);
+        }
       });
     });
 
-    fileInput.addEventListener("change", () => updateSummary(fileInput.files));
+    fileInput.addEventListener("change", () => {
+      addToSelection(fileInput.files);
+      // Reset so picking the same file again still fires "change"; the list keeps the File objects.
+      fileInput.value = "";
+    });
   }
+
+  selectionClear?.addEventListener("click", () => {
+    [...selection].forEach(removeFromSelection);
+  });
 
   if (uploadForm && fileInput && activityTray) {
     uploadForm.addEventListener("submit", (event) => {
       event.preventDefault();
+      if (uploading) {
+        return;
+      }
 
-      const files = Array.from(fileInput.files || []);
-      if (files.length === 0) {
-        const emptyActivity = createActivity({
-          title: "Upload needed",
-          detail: "Choose at least one file before uploading.",
-          tone: "warning",
-        });
-        updateActivity(emptyActivity, {
-          progressPercent: 100,
-          tone: "warning",
-          badgeText: "Check",
-        });
-        dismissActivity(emptyActivity, 2200);
+      const entries = [...selection];
+      if (entries.length === 0) {
+        showFlashToast("warning", "Choose at least one file first.");
         return;
       }
 
       const activity = createActivity({
-        title: "Uploading files",
-        detail: `Preparing ${files.length} file(s) for upload...`,
+        title: "Uploading",
+        detail: `0 of ${entries.length} file(s)`,
+        showList: false,
       });
-      files.forEach((file, index) => {
-        setFileStatus(activity, String(index), {
-          label: file.name,
-          tone: "queued",
-          detail: "Waiting to upload",
-          statusText: "Queued",
-        });
-      });
-
-      setButtonBusy(uploadSubmit, true, "Uploading...");
-      setButtonBusy(convertSubmit, true, "Convert");
+      setUploadLocked(true);
 
       const uploadUrl = uploadForm.dataset.uploadAsyncUrl || uploadForm.action;
-      const maxUploadBytes = Number(uploadForm.dataset.maxUploadBytes) || Infinity;
-      const totalBytes = files.reduce((sum, file) => sum + file.size, 0) || 1;
+      const totalBytes = entries.reduce((sum, entry) => sum + entry.file.size, 0) || 1;
       const maxAttempts = 3;
 
       // One request per file: a failure only costs that file, and it can be retried alone.
@@ -476,47 +558,23 @@ document.addEventListener("DOMContentLoaded", () => {
           xhr.send(body);
         });
 
-      // Retry dropped connections and server hiccups; never retry a definite answer (4xx, disk full).
-      const isRetryable = (status) => status === 0 || (status >= 500 && status !== 507);
+      // Retry dropped connections and server hiccups; never retry a definite answer (4xx).
+      const isRetryable = (status) => status === 0 || status >= 500;
       const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
       const uploadAll = async () => {
-        const counts = { uploaded: 0, skipped: 0, failed: 0 };
+        const counts = { uploaded: 0, failed: 0 };
         let finishedBytes = 0;
 
-        for (const [index, file] of files.entries()) {
-          const key = String(index);
-          const detailPrefix = files.length > 1 ? `File ${index + 1} of ${files.length}` : "Uploading";
-
-          if (file.size > maxUploadBytes) {
-            counts.failed += 1;
-            finishedBytes += file.size;
-            setFileStatus(activity, key, {
-              label: file.name,
-              tone: "error",
-              detail: `Too large (limit ${formatBytes(maxUploadBytes)})`,
-              statusText: "Error",
-            });
-            continue;
-          }
-
+        for (const [index, entry] of entries.entries()) {
+          const { file } = entry;
           let result = { status: 0, payload: null };
           for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-            setFileStatus(activity, key, {
-              label: file.name,
-              tone: "processing",
-              detail: attempt > 1 ? `Retrying (${attempt}/${maxAttempts})...` : "Uploading...",
-              statusText: "Sending",
-            });
+            setSelectionState(entry, "sending", attempt > 1 ? `Retrying (${attempt}/${maxAttempts})` : "0%");
             result = await sendFile(file, (fraction) => {
-              setFileStatus(activity, key, {
-                label: file.name,
-                tone: "processing",
-                detail: fraction >= 1 ? "Checking audio..." : `${Math.round(fraction * 100)}% of ${formatBytes(file.size)}`,
-                statusText: "Sending",
-              });
+              setSelectionState(entry, "sending", fraction >= 1 ? "Checking audio..." : `${Math.round(fraction * 100)}%`);
               updateActivity(activity, {
-                detail: `${detailPrefix}...`,
+                detail: `${index} of ${entries.length} file(s) · ${file.name}`,
                 progressPercent: ((finishedBytes + fraction * file.size) / totalBytes) * 100,
                 tone: "running",
                 badgeText: "Working",
@@ -529,59 +587,36 @@ document.addEventListener("DOMContentLoaded", () => {
           }
           finishedBytes += file.size;
 
-          const entry = result.payload?.results?.[0];
-          if (entry?.status === "uploaded") {
+          const outcome = result.payload?.results?.[0];
+          if (outcome?.status === "uploaded") {
             counts.uploaded += 1;
-            setFileStatus(activity, key, {
-              label: file.name,
-              tone: "success",
-              detail: entry.stored_name === entry.source_name ? "Uploaded" : `Saved as ${entry.stored_name}`,
-              statusText: "Done",
-            });
-          } else if (entry?.status === "skipped") {
-            counts.skipped += 1;
-            setFileStatus(activity, key, {
-              label: file.name,
-              tone: "warning",
-              detail: entry.reason || "Skipped",
-              statusText: "Skipped",
-            });
+            // Uploaded files leave the list and show up in the Uploaded table.
+            removeFromSelection(entry);
+            void refreshPageState().catch(() => {});
           } else {
             counts.failed += 1;
-            setFileStatus(activity, key, {
-              label: file.name,
-              tone: "error",
-              detail:
-                result.payload?.message ||
-                (result.status === 0 ? "Connection lost" : `Server error (${result.status})`),
-              statusText: "Error",
-            });
+            const reason =
+              outcome?.reason ||
+              result.payload?.message ||
+              (result.status === 0 ? "Connection lost" : `Server error (${result.status})`);
+            setSelectionState(entry, "failed", reason);
           }
         }
         return counts;
       };
 
       void uploadAll().then(async (counts) => {
-        const parts = [`${counts.uploaded} uploaded`];
-        if (counts.skipped) {
-          parts.push(`${counts.skipped} skipped`);
-        }
-        if (counts.failed) {
-          parts.push(`${counts.failed} failed`);
-        }
-        const tone = counts.failed || counts.uploaded === 0 ? "error" : counts.skipped ? "warning" : "success";
+        const tone = counts.failed ? (counts.uploaded ? "warning" : "error") : "success";
+        const detail = counts.failed
+          ? `${counts.uploaded} uploaded, ${counts.failed} failed. Failed files stay in the list.`
+          : `${counts.uploaded} uploaded.`;
         updateActivity(activity, {
-          detail: `${parts.join(", ")}.`,
+          detail,
           progressPercent: 100,
           tone,
           badgeText: tone === "success" ? "Done" : tone === "warning" ? "Mixed" : "Error",
         });
-
-        // Always clear: re-sending the same selection would duplicate the files that did upload.
-        fileInput.value = "";
-        updateSummary(fileInput.files);
-        setButtonBusy(uploadSubmit, false, "Uploading...");
-        setButtonBusy(convertSubmit, false, "Convert");
+        setUploadLocked(false);
 
         if (counts.uploaded) {
           try {
@@ -590,7 +625,6 @@ document.addEventListener("DOMContentLoaded", () => {
             showFlashToast("warning", error.message || "Uploaded, but the file list could not be refreshed.");
           }
         }
-        // Keep problem reports on screen long enough to read.
         dismissActivity(activity, tone === "success" ? 3200 : 8000);
       });
     });
@@ -626,7 +660,11 @@ document.addEventListener("DOMContentLoaded", () => {
       updateActivity(activity, { indeterminate: true });
 
       setButtonBusy(uploadSubmit, true, "Upload");
-      setButtonBusy(convertSubmit, true, "Converting...");
+      convertBusy = true;
+      if (convertSubmit) {
+        convertSubmit.disabled = true;
+        convertSubmit.textContent = "Converting...";
+      }
       if (formatSelect) {
         formatSelect.disabled = true;
       }
@@ -774,7 +812,8 @@ document.addEventListener("DOMContentLoaded", () => {
             });
 
             setButtonBusy(uploadSubmit, false, "Upload");
-            setButtonBusy(convertSubmit, false, "Converting...");
+            convertBusy = false;
+            updateConvertState();
             if (formatSelect) {
               formatSelect.disabled = false;
             }
@@ -832,7 +871,8 @@ document.addEventListener("DOMContentLoaded", () => {
           dismissActivity(activity, 3200);
         }
         setButtonBusy(uploadSubmit, false, "Upload");
-        setButtonBusy(convertSubmit, false, "Converting...");
+        convertBusy = false;
+        updateConvertState();
         if (formatSelect) {
           formatSelect.disabled = false;
         }
@@ -850,5 +890,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  updateSummary(fileInput?.files);
+  formatSelect?.addEventListener("change", updateConvertState);
+  renderSelection();
+  updateConvertState();
 });
