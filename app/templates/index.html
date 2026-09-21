@@ -55,7 +55,14 @@
               {{ retention_cell(file) }}
               <td>
                 <div class="table-actions">
-                  <a class="link-button" href="{{ url_for('download_file', category=category, filename=file.name) }}">Download</a>
+                  <a
+                    class="icon-button"
+                    href="{{ url_for('download_file', category=category, filename=file.name) }}"
+                    title="Download"
+                    aria-label="Download {{ file.name }}"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14" /></svg>
+                  </a>
                   <form
                     action="{{ url_for('delete_file', category=category, filename=file.name) }}"
                     method="post"
@@ -63,7 +70,9 @@
                     data-confirm="Delete {{ file.name }}?"
                     onsubmit="return confirm(this.dataset.confirm);"
                   >
-                    <button type="submit" class="link-button link-button-danger">Delete</button>
+                    <button type="submit" class="icon-button icon-button-danger" title="Delete" aria-label="Delete {{ file.name }}">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2m-7 0l1 12h8l1-12" /></svg>
+                    </button>
                   </form>
                 </div>
               </td>
