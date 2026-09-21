@@ -605,8 +605,10 @@ select {
   border-bottom: none;
 }
 
+/* Name takes whatever width is left and ellipsizes; the full name is in the title tooltip. */
 .name-cell {
-  max-width: 260px;
+  width: 100%;
+  max-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -733,9 +735,9 @@ select {
   visibility: hidden;
 }
 
+/* During an upload the picker is off, but drops still add to the list. */
 .dropzone.is-locked {
-  opacity: 0.6;
-  cursor: progress;
+  cursor: default;
 }
 
 .empty-state {
@@ -749,8 +751,46 @@ select {
 .table-actions {
   display: flex;
   flex-wrap: nowrap;
-  gap: 12px;
+  gap: 4px;
   justify-content: flex-end;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.icon-button:hover,
+.icon-button:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.icon-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-button-danger {
+  color: var(--danger);
+}
+
+.icon-button-danger:hover,
+.icon-button-danger:focus-visible {
+  background: var(--danger-soft);
 }
 
 .inline-form {
@@ -814,16 +854,6 @@ select {
 
   .file-panel {
     overflow-x: auto;
-  }
-
-  .name-cell {
-    max-width: 130px;
-  }
-
-  .table-actions {
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 6px;
   }
 
   .size-col {

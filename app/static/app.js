@@ -475,23 +475,49 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   if (dropzone && fileInput) {
-    ["dragenter", "dragover"].forEach((eventName) => {
-      dropzone.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        if (!uploading) {
-          dropzone.classList.add("is-active");
-        }
-      });
+    // Catch file drops on the whole page: the browser's default is to open the file (leaving
+    // the page and killing any upload). Drops during an upload are queued for the next one.
+    const isFileDrag = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
+    let dragDepth = 0;
+
+    window.addEventListener("dragenter", (event) => {
+      if (!isFileDrag(event)) {
+        return;
+      }
+      event.preventDefault();
+      dragDepth += 1;
+      dropzone.classList.add("is-active");
     });
 
-    ["dragleave", "drop"].forEach((eventName) => {
-      dropzone.addEventListener(eventName, (event) => {
-        event.preventDefault();
+    window.addEventListener("dragover", (event) => {
+      if (!isFileDrag(event)) {
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    });
+
+    window.addEventListener("dragleave", (event) => {
+      if (!isFileDrag(event)) {
+        return;
+      }
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) {
         dropzone.classList.remove("is-active");
-        if (eventName === "drop" && !uploading) {
-          addToSelection(event.dataTransfer?.files);
-        }
-      });
+      }
+    });
+
+    window.addEventListener("drop", (event) => {
+      if (!isFileDrag(event)) {
+        return;
+      }
+      event.preventDefault();
+      dragDepth = 0;
+      dropzone.classList.remove("is-active");
+      addToSelection(event.dataTransfer.files);
+      if (uploading) {
+        showFlashToast("info", "Added to the list. Upload them when the current upload finishes.");
+      }
     });
 
     fileInput.addEventListener("change", () => {
