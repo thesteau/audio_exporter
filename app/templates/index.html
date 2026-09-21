@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
     <title>Audio Exporter</title>
     <script>
       document.documentElement.classList.add("js");
@@ -11,12 +12,61 @@
     <script src="/static/app.js" defer></script>
   </head>
   <body>
+    {% macro help(text) -%}
+      <button type="button" class="help" aria-label="Help: {{ text }}" data-tip="{{ text }}">?</button>
+    {%- endmacro %}
+
+    {% macro retention_cell(file) -%}
+      <td
+        class="retention-cell"
+        data-retention
+        data-expires-at="{{ file.expires_at }}"
+        data-delete-at="{{ file.delete_at }}"
+      >
+        <span class="tag tag-{{ file.retention }}" data-retention-tag>{{ file.retention | capitalize }}</span>
+        <span class="muted" data-retention-remaining>{{ (file.delete_at - server_now) | remaining }}</span>
+      </td>
+    {%- endmacro %}
+
+    {% macro file_table(files, category) -%}
+      <table class="file-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Size</th>
+            <th>Deletes in {{ help("Removed " ~ retention_hours ~ "h after upload or conversion, at the next cleanup sweep (every " ~ sweep_minutes ~ " min). Active: plenty of time. Expiring: under " ~ (expiry_warning // 3600) ~ "h left. Deleting: goes at the next sweep.") }}</th>
+            <th><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for file in files %}
+            <tr {% if category == 'uploaded' %}data-uploaded-file-row{% endif %} data-file-name="{{ file.name }}">
+              <td class="name-cell" title="{{ file.name }}">{{ file.name }}</td>
+              <td class="nowrap">{{ file.size | filesize }}</td>
+              {{ retention_cell(file) }}
+              <td>
+                <div class="table-actions">
+                  <a class="link-button" href="{{ url_for('download_file', category=category, filename=file.name) }}">Download</a>
+                  <form
+                    action="{{ url_for('delete_file', category=category, filename=file.name) }}"
+                    method="post"
+                    class="inline-form"
+                    data-confirm="Delete {{ file.name }}?"
+                    onsubmit="return confirm(this.dataset.confirm);"
+                  >
+                    <button type="submit" class="link-button link-button-danger">Delete</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {%- endmacro %}
+
     <div class="site-shell">
       <header class="top-bar">
-        <div>
-          <h1>Audio Exporter</h1>
-          <p class="subtitle">Upload audio or video files and choose whether the output should be MP3 or FLAC.</p>
-        </div>
+        <h1>Audio Exporter</h1>
       </header>
 
       <main>
@@ -33,24 +83,25 @@
         {% endwith %}
 
         <section class="card upload-card">
-          <h2>Upload media files</h2>
-          <p class="card-copy">Upload first, then convert when you are ready.</p>
           <form
             action="{{ url_for('upload') }}"
             method="post"
             enctype="multipart/form-data"
             data-upload-form
             data-upload-async-url="{{ url_for('upload_async') }}"
+            data-max-upload-bytes="{{ max_upload_bytes }}"
           >
-            <label class="field-label" for="files">Select one or more audio or video files</label>
+            <div class="section-heading">
+              <h2>Upload</h2>
+              {{ help("Audio or video files, up to " ~ (max_upload_bytes | filesize) ~ " each. Anything without an audio track is rejected. Upload first, then convert.") }}
+            </div>
             <label class="dropzone" for="files" data-dropzone>
               <input type="file" id="files" name="files" accept="audio/*,video/*" multiple data-file-input />
-              <span class="dropzone-title">Drag and drop files here</span>
-              <span class="dropzone-subtitle">or click to browse from your computer</span>
-              <span class="dropzone-summary" data-file-summary>No files selected yet.</span>
+              <span class="dropzone-title">Drop files or click to browse</span>
+              <span class="dropzone-summary" data-file-summary>No files selected</span>
             </label>
             <div class="button-row">
-              <button type="submit" class="btn btn-primary" data-upload-submit>Upload Files</button>
+              <button type="submit" class="btn btn-primary" data-upload-submit>Upload</button>
             </div>
           </form>
           <form
@@ -60,96 +111,65 @@
             data-convert-form
             data-process-stream-url="{{ url_for('process_files_stream') }}"
           >
-            <label class="field-label" for="output_format">Output format</label>
-            <select id="output_format" name="output_format">
-              {% for format_key, format_info in output_formats.items() %}
-                <option value="{{ format_key }}" {% if format_key == default_output_format %}selected{% endif %}>{{ format_info.label }}</option>
-              {% endfor %}
-            </select>
-            <div class="button-row">
+            <div class="section-heading">
+              <h2><label for="output_format">Convert to</label></h2>
+              {{ help("MP3: smaller, lossy (VBR ~190 kbps). FLAC: lossless, larger. Files already in the target codec are copied without re-encoding. Cover art and tags are kept.") }}
+            </div>
+            <div class="convert-row">
+              <select id="output_format" name="output_format">
+                {% for format_key, format_info in output_formats.items() %}
+                  <option value="{{ format_key }}" {% if format_key == default_output_format %}selected{% endif %}>{{ format_info.label }}</option>
+                {% endfor %}
+              </select>
               <button
                 type="submit"
                 class="btn btn-secondary"
                 data-convert-submit
-                {% if not uploaded_files %}disabled{% endif %}
+                data-default-label="Convert"
+                {% if not uploaded_files or conversion_running %}disabled{% endif %}
               >
-                Convert Uploaded Files
+                {% if conversion_running %}Converting...{% else %}Convert{% endif %}
               </button>
             </div>
           </form>
         </section>
 
-        <section class="file-grid file-grid-two">
+        <section
+          class="file-grid file-grid-two"
+          data-file-grid
+          data-server-now="{{ server_now }}"
+          data-expiry-warning="{{ expiry_warning }}"
+          data-expiry-critical="{{ expiry_critical }}"
+          data-conversion-running="{{ 'true' if conversion_running else 'false' }}"
+        >
           <div class="file-panel">
             <div class="panel-header">
               <h3>Uploaded</h3>
-              <span class="count">{{ uploaded_files | length }} files</span>
+              <span class="count">{{ uploaded_files | length }}</span>
             </div>
             {% if uploaded_files %}
-              <table class="file-table">
-                <thead>
-                  <tr><th>Name</th><th>Size</th><th>Modified</th><th>Actions</th></tr>
-                </thead>
-                <tbody>
-                  {% for file in uploaded_files %}
-                    <tr data-uploaded-file-row data-file-name="{{ file.name }}">
-                      <td>{{ file.name }}</td>
-                      <td>{{ (file.size / 1024) | round(1) }} KB</td>
-                      <td>{{ file.modified.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                      <td>
-                        <div class="table-actions">
-                          <a class="link-button" href="{{ url_for('download_file', category='uploaded', filename=file.name) }}">Download</a>
-                          <form action="{{ url_for('delete_file', category='uploaded', filename=file.name) }}" method="post" class="inline-form">
-                            <button type="submit" class="link-button link-button-danger" onclick="return confirm('Delete {{ file.name }}?');">Delete</button>
-                          </form>
-                        </div>
-                      </td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
+              {{ file_table(uploaded_files, 'uploaded') }}
             {% else %}
-              <div class="empty-state">No uploaded files yet.</div>
+              <div class="empty-state">Nothing uploaded</div>
             {% endif %}
           </div>
 
           <div class="file-panel">
             <div class="panel-header">
-              <h3>Processed</h3>
-              <span class="count">{{ converted_files | length }} files</span>
-            </div>
-            <div class="panel-actions">
-              {% if converted_files %}
-                <a class="btn btn-secondary" href="{{ url_for('download_zip', category='converted') }}">Download ZIP</a>
-              {% else %}
-                <span class="btn btn-secondary btn-disabled">Download ZIP</span>
-              {% endif %}
+              <h3>Converted</h3>
+              <span class="count">{{ converted_files | length }}</span>
+              <div class="panel-actions">
+                {% if converted_files %}
+                  <a class="btn btn-secondary btn-small" href="{{ url_for('download_zip', category='converted') }}">Download ZIP</a>
+                {% else %}
+                  <span class="btn btn-secondary btn-small btn-disabled">Download ZIP</span>
+                {% endif %}
+              </div>
             </div>
             {% if converted_files %}
-              <table class="file-table">
-                <thead>
-                  <tr><th>Name</th><th>Size</th><th>Modified</th><th>Actions</th></tr>
-                </thead>
-                <tbody>
-                  {% for file in converted_files %}
-                    <tr>
-                      <td>{{ file.name }}</td>
-                      <td>{{ (file.size / 1024) | round(1) }} KB</td>
-                      <td>{{ file.modified.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                      <td>
-                        <div class="table-actions">
-                          <a class="link-button" href="{{ url_for('download_file', category='converted', filename=file.name) }}">Download</a>
-                          <form action="{{ url_for('delete_file', category='converted', filename=file.name) }}" method="post" class="inline-form">
-                            <button type="submit" class="link-button link-button-danger" onclick="return confirm('Delete {{ file.name }}?');">Delete</button>
-                          </form>
-                        </div>
-                      </td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
+              {{ file_table(converted_files, 'converted') }}
             {% else %}
-              <div class="empty-state">No processed files yet.</div>
+              <div class="empty-state">Nothing converted</div>
             {% endif %}
           </div>
         </section>

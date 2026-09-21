@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Guard for fix_songs.sh, which the app runs with this directory first on PATH.
+# 1. The script calls ffmpeg inside `find | while read`, so ffmpeg's stdin is the file list;
+#    ffmpeg polls stdin for keypresses and eats the next file names. Force stdin off.
+# 2. Encode to a hidden .partial- file and rename on success, so a crash mid-encode never
+#    leaves a truncated output that later passes would skip as "already converted".
+self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$self_dir" | paste -sd ':' -)"
+
+if [ "$#" -lt 2 ]; then
+  exec ffmpeg -nostdin "$@" </dev/null
+fi
+
+output="${!#}"
+output_dir="$(dirname "$output")"
+if [[ "$output" == -* ]] || [ ! -d "$output_dir" ]; then
+  exec ffmpeg -nostdin "$@" </dev/null
+fi
+
+# Keep the real extension last so ffmpeg still picks the right muxer.
+partial="$output_dir/.partial-$(basename "$output")"
+ffmpeg -nostdin "${@:1:$#-1}" "$partial" </dev/null
+status=$?
+if [ "$status" -eq 0 ]; then
+  mv -f "$partial" "$output"
+  status=$?
+fi
+rm -f "$partial"
+exit "$status"

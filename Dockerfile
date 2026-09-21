@@ -9,10 +9,10 @@ RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./
 
-RUN chmod +x /app/fix_songs.sh
+RUN chmod +x /app/fix_songs.sh /app/bin/ffmpeg
 
 ENV PYTHONUNBUFFERED=1 \
     AUDIO_EXPORTER_STORAGE_DIR=/songs \
     AUDIO_EXPORTER_SCRIPT_PATH=/app/fix_songs.sh
 EXPOSE 8000
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "app:app", "--workers", "1", "--threads", "2"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "app:app", "--workers", "1", "--threads", "4"]

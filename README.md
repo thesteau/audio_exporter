@@ -17,9 +17,12 @@ In this repo, the mounted host folder is `songs/`.
 - Rejects unsupported uploads before they are added to the queue.
 - Lets the user choose the output format: MP3 or FLAC.
 - Keeps original uploads in `uploaded` and writes converted files into `converted`.
-- Supports individual downloads, deletion, and ZIP download for processed files.
+- Supports individual downloads, deletion, and ZIP download for processed files (streamed, not built in memory).
+- Uploads one file per request with per-file progress and automatic retry on dropped connections.
+- Only files without an output in the chosen format are converted; already-converted uploads are left alone and not reported.
 - Shows upload and conversion activity in the web UI, including streamed conversion progress.
-- Removes files older than six hours from both storage folders, with cleanup checks running hourly.
+- Removes files older than six hours from both storage folders, with cleanup checks running hourly. Each file shows a retention tag: Active, Expiring (under 2h left) or Deleting (under 1h left, removed at the next sweep).
+- Runs one conversion pass at a time; a pass keeps running if the browser tab is closed.
 
 ## Run with Docker Compose
 
@@ -31,7 +34,10 @@ The compose file mounts `./songs` on the host to `/songs` in the container and p
 
 ## Notes
 
-- The app uses `/songs` inside the container.
+- The app uses `/songs` inside the container (`AUDIO_EXPORTER_STORAGE_DIR`).
+- Uploads are staged in `/songs/.incoming` until validated, so a conversion never picks up a half-written file.
+- The app runs `fix_songs.sh` with `app/bin` first on `PATH`; `app/bin/ffmpeg` wraps the real ffmpeg with `-nostdin` so it cannot consume the script's file list, and encodes to a hidden `.partial-*` file that is renamed only on success (stale partials are removed at startup).
+- `AUDIO_EXPORTER_MAX_UPLOAD_MB` (default 2048) caps each uploaded file; `AUDIO_EXPORTER_MIN_FREE_MB` (default 1024) refuses uploads that would leave less free space on the storage volume.
 - App source files live under `app/`.
 - Output format defaults to MP3.
 - `fix_songs.sh` handles the FFmpeg conversion work.
