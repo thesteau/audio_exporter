@@ -89,10 +89,11 @@
             enctype="multipart/form-data"
             data-upload-form
             data-upload-async-url="{{ url_for('upload_async') }}"
+            data-max-upload-bytes="{{ max_upload_bytes }}"
           >
             <div class="section-heading">
               <h2>Upload</h2>
-              {{ help("Audio or video files. Anything without an audio track is rejected. Upload first, then convert.") }}
+              {{ help("Audio or video files, up to " ~ (max_upload_bytes | filesize) ~ " each. Anything without an audio track is rejected. Upload first, then convert.") }}
             </div>
             <label class="dropzone" for="files" data-dropzone>
               <input type="file" id="files" name="files" accept="audio/*,video/*" multiple data-file-input />

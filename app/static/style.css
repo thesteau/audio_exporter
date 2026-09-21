@@ -112,7 +112,7 @@ h2 {
   content: attr(data-tip);
   position: absolute;
   top: calc(100% + 8px);
-  left: 50%;
+  left: -8px;
   z-index: 30;
   width: max-content;
   max-width: min(280px, 70vw);
@@ -131,7 +131,7 @@ h2 {
   white-space: normal;
   opacity: 0;
   visibility: hidden;
-  transform: translate(-50%, -4px);
+  transform: translateY(-4px);
   transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
   pointer-events: none;
 }
@@ -141,7 +141,7 @@ h2 {
 .help:focus::after {
   opacity: 1;
   visibility: visible;
-  transform: translate(-50%, 0);
+  transform: translateY(0);
 }
 
 /* Table header tips sit near the right edge: open leftward. */

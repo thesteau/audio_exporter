@@ -1,7 +1,9 @@
+import io
 import os
 import threading
 import time
 import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -155,6 +157,44 @@ def cleanup_media_files():
         removed_names = ", ".join(str(path.name) for path in removed)
         print(safe_console_text(f"Cleaned up media files: {removed_names}"))
     return removed
+
+
+class _ChunkSink(io.RawIOBase):
+    """Write-only, non-seekable buffer that ZipFile writes into and stream_zip drains."""
+
+    def __init__(self):
+        self._chunks = []
+
+    def writable(self):
+        return True
+
+    def write(self, data):
+        self._chunks.append(bytes(data))
+        return len(data)
+
+    def drain(self) -> bytes:
+        data = b"".join(self._chunks)
+        self._chunks.clear()
+        return data
+
+
+def stream_zip(paths, chunk_size: int = 1024 * 1024):
+    """Yield a ZIP of paths chunk by chunk. Audio is already compressed, so entries are stored."""
+    sink = _ChunkSink()
+    with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as archive:
+        for path in paths:
+            try:
+                info = zipfile.ZipInfo.from_file(path, arcname=path.name)
+                source = path.open("rb")
+            except OSError:
+                continue  # removed since the listing (user delete or sweep)
+            info.compress_type = zipfile.ZIP_STORED
+            with source, archive.open(info, "w", force_zip64=True) as entry:
+                while chunk := source.read(chunk_size):
+                    entry.write(chunk)
+                    yield sink.drain()
+            yield sink.drain()
+    yield sink.drain()
 
 
 def validate_category(category: str):

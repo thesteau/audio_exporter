@@ -346,23 +346,6 @@ document.addEventListener("DOMContentLoaded", () => {
   updateRetention();
   window.setInterval(updateRetention, 30000);
 
-  const handleUploadFailure = (activity, files, message) => {
-    files.forEach((file, index) => {
-      setFileStatus(activity, String(index), {
-        label: file.name,
-        tone: "error",
-        detail: message,
-        statusText: "Error",
-      });
-    });
-    updateActivity(activity, {
-      detail: message,
-      progressPercent: 100,
-      tone: "error",
-      badgeText: "Error",
-    });
-  };
-
   const showFlashToast = (category, message) => {
     const toneMap = {
       success: "success",
@@ -459,131 +442,157 @@ document.addEventListener("DOMContentLoaded", () => {
       setButtonBusy(uploadSubmit, true, "Uploading...");
       setButtonBusy(convertSubmit, true, "Convert");
 
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", uploadForm.dataset.uploadAsyncUrl || uploadForm.action);
-      xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+      const uploadUrl = uploadForm.dataset.uploadAsyncUrl || uploadForm.action;
+      const maxUploadBytes = Number(uploadForm.dataset.maxUploadBytes) || Infinity;
+      const totalBytes = files.reduce((sum, file) => sum + file.size, 0) || 1;
+      const maxAttempts = 3;
 
-      xhr.upload.addEventListener("loadstart", () => {
-        files.forEach((file, index) => {
-          setFileStatus(activity, String(index), {
-            label: file.name,
-            tone: "processing",
-            detail: "Uploading...",
-            statusText: "Sending",
+      // One request per file: a failure only costs that file, and it can be retried alone.
+      // Resolves { status, payload }; status 0 means no response (network drop, reset).
+      const sendFile = (file, onProgress) =>
+        new Promise((resolve) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", uploadUrl);
+          xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+          xhr.upload.addEventListener("progress", (progressEvent) => {
+            if (progressEvent.lengthComputable) {
+              onProgress(progressEvent.loaded / progressEvent.total);
+            }
           });
+          xhr.addEventListener("load", () => {
+            let payload = null;
+            try {
+              payload = JSON.parse(xhr.responseText || "null");
+            } catch (error) {
+              payload = null;
+            }
+            resolve({ status: xhr.status, payload });
+          });
+          xhr.addEventListener("error", () => resolve({ status: 0, payload: null }));
+          xhr.addEventListener("abort", () => resolve({ status: 0, payload: null }));
+
+          const body = new FormData();
+          body.append("files", file, file.name);
+          xhr.send(body);
         });
-      });
 
-      xhr.upload.addEventListener("progress", (progressEvent) => {
-        const progressPercent = progressEvent.lengthComputable
-          ? Math.round((progressEvent.loaded / progressEvent.total) * 100)
-          : 0;
-        const detail = progressEvent.lengthComputable
-          ? `Uploading ${files.length} file(s): ${progressPercent}% of ${formatBytes(progressEvent.total)}`
-          : `Uploading ${files.length} file(s)...`;
+      // Retry dropped connections and server hiccups; never retry a definite answer (4xx, disk full).
+      const isRetryable = (status) => status === 0 || (status >= 500 && status !== 507);
+      const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
-        updateActivity(activity, {
-          detail,
-          progressPercent,
-          tone: "running",
-          badgeText: "Working",
-        });
-      });
+      const uploadAll = async () => {
+        const counts = { uploaded: 0, skipped: 0, failed: 0 };
+        let finishedBytes = 0;
 
-      xhr.upload.addEventListener("load", () => {
-        updateActivity(activity, {
-          detail: "Upload received. Checking each file now...",
-          progressPercent: 100,
-          tone: "running",
-          badgeText: "Working",
-        });
-      });
+        for (const [index, file] of files.entries()) {
+          const key = String(index);
+          const detailPrefix = files.length > 1 ? `File ${index + 1} of ${files.length}` : "Uploading";
 
-      xhr.addEventListener("error", () => {
-        handleUploadFailure(activity, files, "Upload failed. Please try again.");
-        setButtonBusy(uploadSubmit, false, "Uploading...");
-        setButtonBusy(convertSubmit, false, "Convert");
-      });
-
-      xhr.addEventListener("load", async () => {
-        let payload = null;
-        try {
-          payload = JSON.parse(xhr.responseText || "{}");
-        } catch (error) {
-          payload = null;
-        }
-
-        if (!payload) {
-          handleUploadFailure(activity, files, "Upload finished, but the server response could not be read.");
-          setButtonBusy(uploadSubmit, false, "Uploading...");
-          setButtonBusy(convertSubmit, false, "Convert");
-          return;
-        }
-
-        const tone = payload.success
-          ? payload.skipped_count > 0
-            ? "warning"
-            : "success"
-          : "error";
-
-        files.forEach((file, index) => {
-          const result = payload.results.find((entry) => entry.index === index);
-          if (!result) {
-            setFileStatus(activity, String(index), {
+          if (file.size > maxUploadBytes) {
+            counts.failed += 1;
+            finishedBytes += file.size;
+            setFileStatus(activity, key, {
               label: file.name,
-              tone: payload.success ? "success" : "error",
-              detail: payload.success ? "Uploaded" : payload.message,
-              statusText: payload.success ? "Uploaded" : "Error",
+              tone: "error",
+              detail: `Too large (limit ${formatBytes(maxUploadBytes)})`,
+              statusText: "Error",
             });
-            return;
+            continue;
           }
 
-          if (result.status === "uploaded") {
-            setFileStatus(activity, String(index), {
-              label: result.source_name,
+          let result = { status: 0, payload: null };
+          for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            setFileStatus(activity, key, {
+              label: file.name,
+              tone: "processing",
+              detail: attempt > 1 ? `Retrying (${attempt}/${maxAttempts})...` : "Uploading...",
+              statusText: "Sending",
+            });
+            result = await sendFile(file, (fraction) => {
+              setFileStatus(activity, key, {
+                label: file.name,
+                tone: "processing",
+                detail: fraction >= 1 ? "Checking audio..." : `${Math.round(fraction * 100)}% of ${formatBytes(file.size)}`,
+                statusText: "Sending",
+              });
+              updateActivity(activity, {
+                detail: `${detailPrefix}...`,
+                progressPercent: ((finishedBytes + fraction * file.size) / totalBytes) * 100,
+                tone: "running",
+                badgeText: "Working",
+              });
+            });
+            if (!isRetryable(result.status) || attempt === maxAttempts) {
+              break;
+            }
+            await wait(1000 * attempt);
+          }
+          finishedBytes += file.size;
+
+          const entry = result.payload?.results?.[0];
+          if (entry?.status === "uploaded") {
+            counts.uploaded += 1;
+            setFileStatus(activity, key, {
+              label: file.name,
               tone: "success",
-              detail: result.stored_name === result.source_name ? "Uploaded successfully" : `Saved as ${result.stored_name}`,
-              statusText: "Uploaded",
+              detail: entry.stored_name === entry.source_name ? "Uploaded" : `Saved as ${entry.stored_name}`,
+              statusText: "Done",
             });
-            return;
+          } else if (entry?.status === "skipped") {
+            counts.skipped += 1;
+            setFileStatus(activity, key, {
+              label: file.name,
+              tone: "warning",
+              detail: entry.reason || "Skipped",
+              statusText: "Skipped",
+            });
+          } else {
+            counts.failed += 1;
+            setFileStatus(activity, key, {
+              label: file.name,
+              tone: "error",
+              detail:
+                result.payload?.message ||
+                (result.status === 0 ? "Connection lost" : `Server error (${result.status})`),
+              statusText: "Error",
+            });
           }
+        }
+        return counts;
+      };
 
-          setFileStatus(activity, String(index), {
-            label: result.source_name,
-            tone: "warning",
-            detail: result.reason || "Skipped",
-            statusText: "Skipped",
-          });
-        });
-
+      void uploadAll().then(async (counts) => {
+        const parts = [`${counts.uploaded} uploaded`];
+        if (counts.skipped) {
+          parts.push(`${counts.skipped} skipped`);
+        }
+        if (counts.failed) {
+          parts.push(`${counts.failed} failed`);
+        }
+        const tone = counts.failed || counts.uploaded === 0 ? "error" : counts.skipped ? "warning" : "success";
         updateActivity(activity, {
-          detail: payload.message,
+          detail: `${parts.join(", ")}.`,
           progressPercent: 100,
           tone,
           badgeText: tone === "success" ? "Done" : tone === "warning" ? "Mixed" : "Error",
         });
 
-        if (!payload.success) {
-          setButtonBusy(uploadSubmit, false, "Uploading...");
-          setButtonBusy(convertSubmit, false, "Convert");
-          return;
-        }
-
+        // Always clear: re-sending the same selection would duplicate the files that did upload.
         fileInput.value = "";
         updateSummary(fileInput.files);
         setButtonBusy(uploadSubmit, false, "Uploading...");
         setButtonBusy(convertSubmit, false, "Convert");
 
-        try {
-          await refreshPageState();
-        } catch (error) {
-          showFlashToast("warning", error.message || "Uploaded, but the file list could not be refreshed.");
+        if (counts.uploaded) {
+          try {
+            await refreshPageState();
+          } catch (error) {
+            showFlashToast("warning", error.message || "Uploaded, but the file list could not be refreshed.");
+          }
         }
-
-        dismissActivity(activity, 3200);
+        // Keep problem reports on screen long enough to read.
+        dismissActivity(activity, tone === "success" ? 3200 : 8000);
       });
-
-      xhr.send(new FormData(uploadForm));
     });
   }
 
@@ -594,8 +603,7 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      const pendingFiles = uploadedFileRows().map((row) => row.dataset.fileName).filter(Boolean);
-      if (pendingFiles.length === 0) {
+      if (uploadedFileRows().length === 0) {
         const emptyActivity = createActivity({
           title: "Nothing to convert",
           detail: "Upload at least one file before converting.",
@@ -613,16 +621,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const outputLabel = formatSelect?.selectedOptions?.[0]?.textContent?.trim() || "Selected Format";
       const activity = createActivity({
         title: `Converting to ${outputLabel}`,
-        detail: `Queued ${pendingFiles.length} uploaded file(s).`,
+        detail: "Starting...",
       });
-      pendingFiles.forEach((fileName) => {
-        setFileStatus(activity, fileName, {
-          label: fileName,
-          tone: "queued",
-          detail: "Waiting in queue",
-          statusText: "Queued",
-        });
-      });
+      updateActivity(activity, { indeterminate: true });
 
       setButtonBusy(uploadSubmit, true, "Upload");
       setButtonBusy(convertSubmit, true, "Converting...");
@@ -631,7 +632,9 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       const completedFiles = new Set();
-      const totalFiles = pendingFiles.length;
+      // The server sends the files this pass will convert (already-converted ones are left out).
+      let pendingFiles = [];
+      let totalFiles = 0;
       let sawCompleteEvent = false;
 
       const refreshProgress = (detail) => {
@@ -655,7 +658,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const contentType = response.headers.get("content-type") || "";
         if (!response.ok || contentType.includes("application/json")) {
           const payload = await response.json().catch(() => ({ message: "Conversion could not start." }));
-          throw new Error(payload.message || "Conversion could not start.");
+          const startError = new Error(payload.message || "Conversion could not start.");
+          startError.isNotice = payload.severity === "info";
+          throw startError;
         }
 
         if (!response.body) {
@@ -672,7 +677,17 @@ document.addEventListener("DOMContentLoaded", () => {
           }
 
           if (payload.event === "start") {
-            refreshProgress(payload.message || `Converting to ${outputLabel}...`);
+            pendingFiles = Array.isArray(payload.files) ? payload.files : [];
+            totalFiles = pendingFiles.length;
+            pendingFiles.forEach((fileName) => {
+              setFileStatus(activity, fileName, {
+                label: fileName,
+                tone: "queued",
+                detail: "Waiting in queue",
+                statusText: "Queued",
+              });
+            });
+            refreshProgress(`Converting ${totalFiles} file(s) to ${outputLabel}...`);
             return;
           }
 
@@ -716,18 +731,6 @@ document.addEventListener("DOMContentLoaded", () => {
               return;
             }
 
-            if (payload.status === "skipped") {
-              completedFiles.add(key);
-              setFileStatus(activity, key, {
-                label: payload.source_name || key,
-                tone: "warning",
-                detail: "Already converted",
-                statusText: "Skipped",
-              });
-              refreshProgress(`${completedFiles.size} of ${totalFiles} file(s) resolved.`);
-              return;
-            }
-
             if (payload.status === "error") {
               completedFiles.add(key);
               setFileStatus(activity, key, {
@@ -761,19 +764,13 @@ document.addEventListener("DOMContentLoaded", () => {
               payload.failed += unprocessed;
               payload.message = `${payload.message} ${unprocessed} not processed.`;
             }
-            const tone = payload.success
-              ? payload.failed > 0
-                ? "error"
-                : payload.skipped > 0
-                  ? "warning"
-                  : "success"
-              : "error";
+            const tone = payload.success && payload.failed === 0 ? "success" : "error";
 
             updateActivity(activity, {
               detail: payload.message,
               progressPercent: 100,
               tone,
-              badgeText: tone === "success" ? "Done" : tone === "warning" ? "Mixed" : "Error",
+              badgeText: tone === "success" ? "Done" : "Error",
             });
 
             setButtonBusy(uploadSubmit, false, "Upload");
@@ -786,7 +783,7 @@ document.addEventListener("DOMContentLoaded", () => {
               showFlashToast("warning", error.message || "Processing finished, but the file list could not be refreshed.");
             });
 
-            dismissActivity(activity, 3200);
+            dismissActivity(activity, tone === "success" ? 3200 : 8000);
           }
         };
 
@@ -824,11 +821,16 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       } catch (error) {
         updateActivity(activity, {
+          title: error.isNotice ? "Nothing to convert" : undefined,
           detail: error.message || "Conversion failed. Please try again.",
           progressPercent: 100,
-          tone: "error",
-          badgeText: "Error",
+          indeterminate: false,
+          tone: error.isNotice ? "success" : "error",
+          badgeText: error.isNotice ? "Up to date" : "Error",
         });
+        if (error.isNotice) {
+          dismissActivity(activity, 3200);
+        }
         setButtonBusy(uploadSubmit, false, "Upload");
         setButtonBusy(convertSubmit, false, "Converting...");
         if (formatSelect) {

@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 
 from ..config import DEFAULT_OUTPUT_FORMAT, GUARD_BIN_DIR, OUTPUT_FORMATS, PROJECT_ROOT, SCRIPT_PATH
+from .files import pending_conversions
 
 # Only one conversion pass at a time: concurrent passes would write the same outputs.
 _conversion_lock = threading.Lock()
@@ -121,6 +122,8 @@ def stream_conversion_events(output_format: str = DEFAULT_OUTPUT_FORMAT):
         }
         return
 
+    # Computed under the lock, so it matches what this pass will actually convert.
+    planned_files = pending_conversions(normalized_format)
     process = None
     try:
         try:
@@ -153,6 +156,7 @@ def stream_conversion_events(output_format: str = DEFAULT_OUTPUT_FORMAT):
         yield {
             "event": "start",
             "output_format": normalized_format,
+            "files": planned_files,
             "message": f"Processing to {normalized_format.upper()} started.",
         }
 
@@ -163,6 +167,9 @@ def stream_conversion_events(output_format: str = DEFAULT_OUTPUT_FORMAT):
                     continue
                 collected_lines.append(line)
                 line_event = parse_conversion_log_line(line)
+                # Files that already have an output are not news; keep them out of the UI.
+                if line_event.get("status") == "skipped":
+                    continue
                 line_event["raw"] = line
                 yield line_event
 
@@ -176,15 +183,11 @@ def stream_conversion_events(output_format: str = DEFAULT_OUTPUT_FORMAT):
 
     joined_output = "\n".join(collected_lines)
     converted, skipped, failed = summarize_conversion_log(joined_output)
-    summary_message = (
-        f"Processing to {normalized_format.upper()} finished. "
-        f"{converted} converted, {skipped} skipped, {failed} failed."
-    )
+    summary_message = f"{converted} converted to {normalized_format.upper()}."
+    if failed:
+        summary_message = f"{summary_message[:-1]}, {failed} failed."
     if return_code != 0:
-        summary_message = (
-            f"Processing to {normalized_format.upper()} finished with errors. "
-            f"{converted} converted, {skipped} skipped, {failed} failed."
-        )
+        summary_message = f"Finished with errors. {summary_message}"
 
     yield {
         "event": "complete",
